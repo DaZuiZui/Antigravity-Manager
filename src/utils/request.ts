@@ -1,5 +1,8 @@
 // 探测环境
 const isTauri = typeof window !== 'undefined' && (!!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__);
+const webBasePath = import.meta.env.BASE_URL === '/'
+  ? ''
+  : import.meta.env.BASE_URL.replace(/\/$/, '');
 
 // 命令到 API 的映射
 const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'DELETE' | 'PATCH' }> = {
@@ -232,7 +235,7 @@ export async function request<T>(cmd: string, args?: any): Promise<T> {
   }
 
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(`${webBasePath}${url}`, options);
     if (!response.ok) {
       if (!isTauri && response.status === 401) {
         // [FIX #1163] 增加防抖锁，避免重复事件导致 UI 抖动

@@ -44,6 +44,9 @@ import {
     Clock,
     Bot,
     Repeat2,
+    Network,
+    RotateCcw,
+    FlaskConical,
 } from 'lucide-react';
 import { Account } from '../../types/account';
 import { useTranslation } from 'react-i18next';
@@ -73,6 +76,9 @@ interface AccountTableProps {
     onExport: (accountId: string) => void;
     onDelete: (accountId: string) => void;
     onToggleProxy: (accountId: string) => void;
+    onConfigureProxy: (accountId: string) => void;
+    onClearLimit: (accountId: string) => void;
+    onTestClaude: (accountId: string) => void;
     onWarmup?: (accountId: string) => void;
     onUpdateLabel?: (accountId: string, label: string) => void;
     /** 拖拽排序回调，当用户完成拖拽时触发 */
@@ -95,6 +101,9 @@ interface SortableRowProps {
     onExport: () => void;
     onDelete: () => void;
     onToggleProxy: () => void;
+    onConfigureProxy: () => void;
+    onClearLimit: () => void;
+    onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
     onViewError: () => void;
@@ -113,6 +122,9 @@ interface AccountRowContentProps {
     onExport: () => void;
     onDelete: () => void;
     onToggleProxy: () => void;
+    onConfigureProxy: () => void;
+    onClearLimit: () => void;
+    onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
     onViewError: () => void;
@@ -192,6 +204,16 @@ function isModelProtected(protectedModels: string[] | undefined, modelName: stri
     return protectedModels.includes(lowerName);
 }
 
+function formatWait(seconds?: number): string {
+    if (!seconds || seconds <= 0) return '';
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.ceil(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
 // ============================================================================
 // 子组件
 // ============================================================================
@@ -215,6 +237,9 @@ function SortableAccountRow({
     onExport,
     onDelete,
     onToggleProxy,
+    onConfigureProxy,
+    onClearLimit,
+    onTestClaude,
     onWarmup,
     onUpdateLabel,
     onViewError,
@@ -281,6 +306,9 @@ function SortableAccountRow({
                 onExport={onExport}
                 onDelete={onDelete}
                 onToggleProxy={onToggleProxy}
+                onConfigureProxy={onConfigureProxy}
+                onClearLimit={onClearLimit}
+                onTestClaude={onTestClaude}
                 onWarmup={onWarmup}
                 onUpdateLabel={onUpdateLabel}
                 onViewError={onViewError}
@@ -306,6 +334,9 @@ function AccountRowContent({
     onExport,
     onDelete,
     onToggleProxy,
+    onConfigureProxy,
+    onClearLimit,
+    onTestClaude,
     onWarmup,
     onUpdateLabel,
     onViewError,
@@ -313,6 +344,8 @@ function AccountRowContent({
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
     const validationBlockedLabel = getValidationBlockedStatusLabel(account.validation_blocked_reason, t);
+    const rateLimitWait = formatWait(account.rate_limit_reset_seconds);
+    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -440,6 +473,24 @@ function AccountRowContent({
                             <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400 text-[10px] font-bold flex items-center gap-1 shadow-sm border border-amber-200/50">
                                 <Clock className="w-2.5 h-2.5" />
                                 <span>{validationBlockedLabel}</span>
+                            </span>
+                        )}
+                        {(account.rate_limited || rateLimitWait) && (
+                            <span
+                                className="px-2 py-0.5 rounded-md bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300 text-[10px] font-bold flex items-center gap-1 shadow-sm border border-yellow-200/60"
+                                title={t('accounts.rate_limited_tooltip', 'Local rate-limit lock. Clear it before retrying this account.')}
+                            >
+                                <Clock className="w-2.5 h-2.5" />
+                                <span>{t('accounts.rate_limited', '临时限流')}{rateLimitWait ? ` ${rateLimitWait}` : ''}</span>
+                            </span>
+                        )}
+                        {hasClaudeProtection && !account.rate_limited && (
+                            <span
+                                className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1 shadow-sm border border-slate-200/60"
+                                title={t('accounts.claude_protected_tooltip', 'Claude is currently protected by quota/scheduler state.')}
+                            >
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>{t('accounts.claude_protected', 'Claude 保护')}</span>
                             </span>
                         )}
 
@@ -656,6 +707,28 @@ function AccountRowContent({
                         <Download className="w-3.5 h-3.5" />
                     </button>
                     <button
+                        className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg transition-all"
+                        onClick={(e) => { e.stopPropagation(); onConfigureProxy(); }}
+                        title={t('accounts.proxy.configure', 'Configure proxy')}
+                    >
+                        <Network className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-all"
+                        onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
+                        title={t('accounts.clear_limit', '解除限流/冻结')}
+                    >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${isRefreshing ? 'bg-violet-50 dark:bg-violet-900/10 text-violet-600 dark:text-violet-400 cursor-not-allowed' : 'hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30'}`}
+                        onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
+                        title={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        disabled={isRefreshing}
+                    >
+                        <FlaskConical className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
+                    </button>
+                    <button
                         className={cn(
                             "p-1.5 rounded-lg transition-all",
                             account.proxy_disabled
@@ -707,6 +780,9 @@ function AccountTable({
     onExport,
     onDelete,
     onToggleProxy,
+    onConfigureProxy,
+    onClearLimit,
+    onTestClaude,
     onReorder,
     onWarmup,
     onUpdateLabel,
@@ -784,7 +860,7 @@ function AccountTable({
                                 {t('accounts.table.quota')}
                             </th>
                             <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[90px] whitespace-nowrap">{t('accounts.table.last_used')}</th>
-                            <th className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 w-[180px] bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
+                            <th className="px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap sticky right-0 w-[205px] bg-gray-50 dark:bg-base-200 z-20 shadow-[-12px_0_12px_-12px_rgba(0,0,0,0.1)] dark:shadow-[-12px_0_12px_-12px_rgba(255,255,255,0.05)] text-center">{t('accounts.table.actions')}</th>
                         </tr >
                     </thead >
                     <SortableContext items={accountIds} strategy={verticalListSortingStrategy}>
@@ -806,6 +882,9 @@ function AccountTable({
                                     onExport={() => onExport(account.id)}
                                     onDelete={() => onDelete(account.id)}
                                     onToggleProxy={() => onToggleProxy(account.id)}
+                                    onConfigureProxy={() => onConfigureProxy(account.id)}
+                                    onClearLimit={() => onClearLimit(account.id)}
+                                    onTestClaude={() => onTestClaude(account.id)}
                                     onWarmup={onWarmup ? () => onWarmup(account.id) : undefined}
                                     onUpdateLabel={onUpdateLabel ? (label: string) => onUpdateLabel(account.id, label) : undefined}
                                     onViewError={() => onViewError(account.id)}
@@ -848,6 +927,9 @@ function AccountTable({
                                         onExport={() => { }}
                                         onDelete={() => { }}
                                         onToggleProxy={() => { }}
+                                        onConfigureProxy={() => { }}
+                                        onClearLimit={() => { }}
+                                        onTestClaude={() => { }}
                                         isDisabled={Boolean(activeAccount.disabled)}
                                         onViewError={() => { }}
                                     />

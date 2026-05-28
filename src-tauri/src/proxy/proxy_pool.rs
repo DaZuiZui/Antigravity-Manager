@@ -203,10 +203,8 @@ impl ProxyPoolManager {
         if let Some(proxy_id) = self.account_bindings.get(account_id) {
             if let Some(entry) = config.proxies.iter().find(|p| p.id == *proxy_id.value()) {
                 if entry.enabled {
-                    // 如果开启了自动故障转移且代理不健康，则返回 None (将回退到其他策略或失败)
-                    if config.auto_failover && !entry.is_healthy {
-                        return Ok(None);
-                    }
+                    // Explicit account bindings are dedicated routes. Keep using the
+                    // selected proxy even if health checks are currently failing.
                     return Ok(Some(self.build_proxy_config(entry)?));
                 }
             }

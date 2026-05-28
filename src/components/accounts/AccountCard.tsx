@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle, ToggleLeft, ToggleRight, Fingerprint, Sparkles, Tag, X, Check, Clock, Bot, Repeat2 } from 'lucide-react';
+import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle, ToggleLeft, ToggleRight, Fingerprint, Sparkles, Tag, X, Check, Clock, Bot, Repeat2, Network, RotateCcw, FlaskConical } from 'lucide-react';
 import { Account } from '../../types/account';
 import { cn } from '../../utils/cn';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +22,9 @@ interface AccountCardProps {
     onExport: () => void;
     onDelete: () => void;
     onToggleProxy: () => void;
+    onConfigureProxy: () => void;
+    onClearLimit: () => void;
+    onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
     onViewError: () => void;
@@ -35,11 +38,23 @@ const DEFAULT_MODELS = Object.entries(MODEL_CONFIG).map(([id, config]) => ({
     Icon: config.Icon
 }));
 
-function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
+function formatWait(seconds?: number): string {
+    if (!seconds || seconds <= 0) return '';
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.ceil(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
     const isDisabled = Boolean(account.disabled);
     const validationBlockedLabel = getValidationBlockedStatusLabel(account.validation_blocked_reason, t);
+    const rateLimitWait = formatWait(account.rate_limit_reset_seconds);
+    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -170,6 +185,24 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                                 <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 text-[9px] font-bold flex items-center gap-1 shadow-sm border border-amber-200/50">
                                     <Clock className="w-2.5 h-2.5" />
                                     {validationBlockedLabel.toUpperCase()}
+                                </span>
+                            )}
+                            {(account.rate_limited || rateLimitWait) && (
+                                <span
+                                    className="px-1.5 py-0.5 rounded-md bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300 text-[9px] font-bold flex items-center gap-1 shadow-sm border border-yellow-200/50"
+                                    title={t('accounts.rate_limited_tooltip', 'Local rate-limit lock. Clear it before retrying this account.')}
+                                >
+                                    <Clock className="w-2.5 h-2.5" />
+                                    {t('accounts.rate_limited', '临时限流')}{rateLimitWait ? ` ${rateLimitWait}` : ''}
+                                </span>
+                            )}
+                            {hasClaudeProtection && !account.rate_limited && (
+                                <span
+                                    className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[9px] font-bold flex items-center gap-1 shadow-sm border border-slate-200/50"
+                                    title={t('accounts.claude_protected_tooltip', 'Claude is currently protected by quota/scheduler state.')}
+                                >
+                                    <Lock className="w-2.5 h-2.5" />
+                                    {t('accounts.claude_protected', 'Claude 保护')}
                                 </span>
                             )}
                             {/* 订阅类型徽章 */}
@@ -359,6 +392,28 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                         title={t('common.export')}
                     >
                         <Download className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        className="p-1.5 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-all"
+                        onClick={(e) => { e.stopPropagation(); onConfigureProxy(); }}
+                        title={t('accounts.proxy.configure', 'Configure proxy')}
+                    >
+                        <Network className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                        onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
+                        title={t('accounts.clear_limit', '解除限流/冻结')}
+                    >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        className={`p-1.5 rounded-lg transition-all ${isRefreshing ? 'text-violet-600 bg-violet-50 cursor-not-allowed' : 'text-gray-400 hover:text-violet-600 hover:bg-violet-50'}`}
+                        onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
+                        title={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        disabled={isRefreshing}
+                    >
+                        <FlaskConical className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
                     </button>
                     <button
                         className={cn(

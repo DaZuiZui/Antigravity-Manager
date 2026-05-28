@@ -3,6 +3,10 @@ import { Lock, Key, Globe, AlertCircle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { isTauri } from '../../utils/env';
 
+const webBasePath = import.meta.env.BASE_URL === '/'
+    ? ''
+    : import.meta.env.BASE_URL.replace(/\/$/, '');
+
 /**
  * AdminAuthGuard
  * 针对 Docker/Web 模式的强制鉴权保护层。
@@ -61,7 +65,7 @@ export const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ childr
             sessionStorage.setItem('abv_admin_api_key', trimmedKey);
 
             // 调用一个需要认证的 API 来验证密码是否正确
-            const response = await fetch('/api/accounts', {
+            const response = await fetch(`${webBasePath}/api/accounts`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',

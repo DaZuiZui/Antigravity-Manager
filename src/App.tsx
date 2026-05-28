@@ -21,6 +21,8 @@ import { isTauri } from './utils/env';
 import { request as invoke } from './utils/request';
 import { AdminAuthGuard } from './components/common/AdminAuthGuard';
 
+const routerBasename = import.meta.env.BASE_URL === '/' ? undefined : import.meta.env.BASE_URL;
+
 const router = createBrowserRouter([
   {
     path: '/',
@@ -60,7 +62,9 @@ const router = createBrowserRouter([
       },
     ],
   },
-]);
+], {
+  basename: routerBasename,
+});
 
 function App() {
   const { config, loadConfig } = useConfigStore();

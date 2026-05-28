@@ -17,6 +17,8 @@ export interface Account {
     validation_blocked?: boolean;
     validation_blocked_until?: number;
     validation_blocked_reason?: string;
+    rate_limited?: boolean;
+    rate_limit_reset_seconds?: number;
     validation_url?: string;
     created_at: number;
     last_used: number;
@@ -68,4 +70,3 @@ export interface DeviceProfileVersion {
     profile: DeviceProfile;
     is_current?: boolean;
 }
-

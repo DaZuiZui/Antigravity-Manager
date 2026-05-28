@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import AccountDetailsDialog from "../components/accounts/AccountDetailsDialog";
 import AccountGrid from "../components/accounts/AccountGrid";
+import AccountProxyDialog from "../components/accounts/AccountProxyDialog";
 import AccountTable from "../components/accounts/AccountTable";
 import AddAccountDialog from "../components/accounts/AddAccountDialog";
 import DeviceFingerprintDialog from "../components/accounts/DeviceFingerprintDialog";
@@ -34,6 +35,9 @@ import { useTranslation } from "react-i18next";
 type FilterType = "all" | "pro" | "ultra" | "free";
 type ViewMode = "list" | "grid";
 
+const webBasePath = import.meta.env.BASE_URL === '/'
+  ? ''
+  : import.meta.env.BASE_URL.replace(/\/$/, '');
 
 function Accounts() {
   const { t } = useTranslation();
@@ -78,6 +82,7 @@ function Accounts() {
     enable: boolean;
   } | null>(null);
   const [isWarmupConfirmOpen, setIsWarmupConfirmOpen] = useState(false);
+  const [proxyAccount, setProxyAccount] = useState<Account | null>(null);
   const [isWarmuping, setIsWarmuping] = useState(false);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
   const [errorAccountId, setErrorAccountId] = useState<string | null>(null);
@@ -354,12 +359,94 @@ function Accounts() {
     });
     try {
       await refreshQuota(accountId);
-      await refreshQuota(accountId);
-      await refreshQuota(accountId);
       showToast(t("common.success"), "success");
     } catch (error) {
       showToast(`${t("common.error")}: ${error}`, "error");
     } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  };
+
+  const handleClearLimit = async (accountId: string) => {
+    setRefreshingIds((prev) => {
+      const next = new Set(prev);
+      next.add(accountId);
+      return next;
+    });
+    try {
+      await invoke('clear_proxy_rate_limit', { accountId }).catch(() => null);
+      await invoke('clear_proxy_session_bindings').catch(() => null);
+      await refreshQuota(accountId).catch(() => null);
+      await fetchAccounts();
+      showToast(t('accounts.limit_cleared', '已解除该账号的限流/冻结记录'), 'success');
+    } catch (error) {
+      showToast(`${t("common.error")}: ${error}`, "error");
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  };
+
+  const handleTestClaude = async (accountId: string) => {
+    const apiKey = config?.proxy?.api_key;
+    if (!apiKey) {
+      showToast(t('accounts.test_missing_api_key', '未找到 API Key'), 'error');
+      return;
+    }
+
+    setRefreshingIds((prev) => {
+      const next = new Set(prev);
+      next.add(accountId);
+      return next;
+    });
+
+    try {
+      await invoke('clear_proxy_rate_limit', { accountId }).catch(() => null);
+      await invoke('clear_proxy_session_bindings').catch(() => null);
+      await invoke('set_preferred_account', { accountId });
+
+      const response = await fetch(`${webBasePath}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'Authorization': `Bearer ${apiKey}`,
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 64,
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+
+      let message = text;
+      try {
+        const data = JSON.parse(text);
+        message = data?.content?.[0]?.text || data?.error?.message || text;
+      } catch {
+        // Keep plain-text responses.
+      }
+
+      await fetchAccounts();
+      showToast(t('accounts.test_success', { message, defaultValue: `4.6 测试成功: ${message}` }), 'success');
+    } catch (error) {
+      await fetchAccounts().catch(() => null);
+      showToast(`${t('accounts.test_failed', '4.6 测试失败')}: ${error}`, 'error');
+    } finally {
+      await invoke('set_preferred_account', { accountId: null }).catch(() => null);
       setRefreshingIds((prev) => {
         const next = new Set(prev);
         next.delete(accountId);
@@ -1073,6 +1160,12 @@ function Accounts() {
                     !!accounts.find((a) => a.id === id)?.proxy_disabled,
                   )
                 }
+                onConfigureProxy={(id) => {
+                  const account = accounts.find((a) => a.id === id);
+                  if (account) setProxyAccount(account);
+                }}
+                onClearLimit={handleClearLimit}
+                onTestClaude={handleTestClaude}
                 onReorder={reorderAccounts}
                 onWarmup={handleWarmup}
                 onUpdateLabel={handleUpdateLabel}
@@ -1101,6 +1194,12 @@ function Accounts() {
                   !!accounts.find((a) => a.id === id)?.proxy_disabled,
                 )
               }
+              onConfigureProxy={(id) => {
+                const account = accounts.find((a) => a.id === id);
+                if (account) setProxyAccount(account);
+              }}
+              onClearLimit={handleClearLimit}
+              onTestClaude={handleTestClaude}
               onWarmup={handleWarmup}
               onUpdateLabel={handleUpdateLabel}
               onViewError={(id: string) => setErrorAccountId(id)}
@@ -1134,6 +1233,13 @@ function Accounts() {
       <DeviceFingerprintDialog
         account={deviceAccount}
         onClose={() => setDeviceAccount(null)}
+      />
+
+      <AccountProxyDialog
+        isOpen={!!proxyAccount}
+        accounts={proxyAccount ? [proxyAccount] : []}
+        autoBindAccountId={proxyAccount?.id}
+        onClose={() => setProxyAccount(null)}
       />
 
       <ModalDialog

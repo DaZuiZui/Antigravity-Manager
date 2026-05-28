@@ -146,6 +146,8 @@ struct AccountResponse {
     validation_blocked: bool,
     validation_blocked_until: Option<i64>,
     validation_blocked_reason: Option<String>,
+    rate_limited: bool,
+    rate_limit_reset_seconds: Option<u64>,
     quota: Option<QuotaResponse>,
     device_bound: bool,
     last_used: i64,
@@ -207,6 +209,8 @@ fn to_account_response(
         validation_blocked: account.validation_blocked,
         validation_blocked_until: account.validation_blocked_until,
         validation_blocked_reason: account.validation_blocked_reason.clone(),
+        rate_limited: false,
+        rate_limit_reset_seconds: None,
     }
 }
 
@@ -838,6 +842,8 @@ async fn admin_list_accounts(
                 is_forbidden: q.is_forbidden,
             });
 
+            let rate_limit_reset_seconds = state.token_manager.get_rate_limit_reset_seconds(&acc.id);
+
             AccountResponse {
                 id: acc.id,
                 email: acc.email,
@@ -853,6 +859,8 @@ async fn admin_list_accounts(
                 validation_blocked: acc.validation_blocked,
                 validation_blocked_until: acc.validation_blocked_until,
                 validation_blocked_reason: acc.validation_blocked_reason,
+                rate_limited: rate_limit_reset_seconds.unwrap_or(0) > 0,
+                rate_limit_reset_seconds,
                 quota,
                 device_bound: acc.device_profile.is_some(),
                 last_used: acc.last_used,
@@ -915,6 +923,8 @@ async fn admin_get_current_account(
                 is_forbidden: q.is_forbidden,
             });
 
+            let rate_limit_reset_seconds = state.token_manager.get_rate_limit_reset_seconds(&acc.id);
+
             AccountResponse {
                 id: acc.id,
                 email: acc.email,
@@ -930,6 +940,8 @@ async fn admin_get_current_account(
                 validation_blocked: acc.validation_blocked,
                 validation_blocked_until: acc.validation_blocked_until,
                 validation_blocked_reason: acc.validation_blocked_reason,
+                rate_limited: rate_limit_reset_seconds.unwrap_or(0) > 0,
+                rate_limit_reset_seconds,
                 quota,
                 device_bound: acc.device_profile.is_some(),
                 last_used: acc.last_used,

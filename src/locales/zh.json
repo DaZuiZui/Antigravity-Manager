@@ -149,6 +149,18 @@
         "disable_proxy_selected": "禁用 ({{count}})",
         "proxy_disabled_reason_manual": "用户手动禁用",
         "proxy_disabled_reason_batch": "批量禁用",
+        "proxy": {
+            "title": "账号代理",
+            "subtitle": "为每个账号指定独立的出站代理。",
+            "single_subtitle": "为当前账号配置专属出站代理。",
+            "configure": "配置代理",
+            "name_placeholder": "代理名称",
+            "pool_count": "代理池中有 {{count}} 个代理",
+            "bound": "已绑定专属代理",
+            "unbound": "默认路由",
+            "proxy_exists": "代理已存在",
+            "proxy_saved": "代理已保存"
+        },
         "forbidden": "403",
         "forbidden_badge": "403",
         "forbidden_tooltip": "API 返回 403 Forbidden，账号无权使用 Gemini Code Assist",

@@ -152,6 +152,18 @@
         "disable_proxy_selected": "Disable ({{count}})",
         "proxy_disabled_reason_manual": "Disabled manually by user",
         "proxy_disabled_reason_batch": "Disabled in batch",
+        "proxy": {
+            "title": "Account Proxies",
+            "subtitle": "Assign a dedicated outbound proxy to each account.",
+            "single_subtitle": "Configure a dedicated outbound proxy for this account.",
+            "configure": "Configure proxy",
+            "name_placeholder": "Proxy name",
+            "pool_count": "{{count}} proxies in pool",
+            "bound": "Dedicated proxy",
+            "unbound": "Default route",
+            "proxy_exists": "Proxy already exists",
+            "proxy_saved": "Proxy saved"
+        },
         "forbidden": "403",
         "forbidden_badge": "403",
         "forbidden_tooltip": "API returned 403 Forbidden, account has no permission for Gemini Code Assist",
