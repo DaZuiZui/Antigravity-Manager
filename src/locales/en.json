@@ -108,6 +108,8 @@
         "export_data": "Export Data",
         "for_gemini": "For Gemini",
         "for_claude": "For Claude",
+        "account_health_map": "Account Health Map",
+        "need_attention": "Need Attention",
         "toast": {
             "switch_success": "Switch successful!",
             "switch_error": "Switch account failed",
