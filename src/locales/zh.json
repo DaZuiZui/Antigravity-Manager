@@ -1,5 +1,6 @@
 {
     "common": {
+        "app_name": "lov-analytics",
         "loading": "加载中...",
         "load_more": "加载更多",
         "add": "添加",

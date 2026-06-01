@@ -1,5 +1,6 @@
 {
     "common": {
+        "app_name": "lov-analytics",
         "loading": "Loading...",
         "empty": "Empty",
         "load_more": "Load More",
