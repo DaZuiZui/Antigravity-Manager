@@ -30,14 +30,11 @@ import { Account } from "../types/account";
 import { cn } from "../utils/cn";
 import { isTauri } from "../utils/env";
 import { request as invoke } from "../utils/request";
+import { webBasePath } from "../utils/webBasePath";
 import { useTranslation } from "react-i18next";
 
 type FilterType = "all" | "pro" | "ultra" | "free";
 type ViewMode = "list" | "grid";
-
-const webBasePath = import.meta.env.BASE_URL === '/'
-  ? ''
-  : import.meta.env.BASE_URL.replace(/\/$/, '');
 
 function Accounts() {
   const { t } = useTranslation();

@@ -2,10 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Key, Globe, AlertCircle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { isTauri } from '../../utils/env';
-
-const webBasePath = import.meta.env.BASE_URL === '/'
-    ? ''
-    : import.meta.env.BASE_URL.replace(/\/$/, '');
+import { webBasePath } from '../../utils/webBasePath';
 
 /**
  * AdminAuthGuard

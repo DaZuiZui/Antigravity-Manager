@@ -20,8 +20,7 @@ import { listen } from '@tauri-apps/api/event';
 import { isTauri } from './utils/env';
 import { request as invoke } from './utils/request';
 import { AdminAuthGuard } from './components/common/AdminAuthGuard';
-
-const routerBasename = import.meta.env.BASE_URL === '/' ? undefined : import.meta.env.BASE_URL;
+import { webRouterBasename } from './utils/webBasePath';
 
 const router = createBrowserRouter([
   {
@@ -34,6 +33,10 @@ const router = createBrowserRouter([
       },
       {
         path: 'accounts',
+        element: <Accounts />,
+      },
+      {
+        path: 'account',
         element: <Accounts />,
       },
       {
@@ -63,7 +66,7 @@ const router = createBrowserRouter([
     ],
   },
 ], {
-  basename: routerBasename,
+  basename: webRouterBasename,
 });
 
 function App() {
