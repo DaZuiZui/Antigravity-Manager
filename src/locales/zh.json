@@ -165,6 +165,12 @@
         "forbidden_badge": "403",
         "forbidden_tooltip": "API 返回 403 Forbidden，账号无权使用 Gemini Code Assist",
         "forbidden_msg": "账号无权限，已跳过自动刷新",
+        "test_model": "测试该账号",
+        "test_modal_title": "选择测试模型",
+        "test_now": "开始测试",
+        "test_missing_api_key": "未找到 API Key",
+        "test_success": "{{model}} 测试成功: {{message}}",
+        "test_failed": "{{model}} 测试失败",
         "status": {
             "forbidden": "403 Forbidden",
             "disabled": "账号已禁用",

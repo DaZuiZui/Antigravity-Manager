@@ -410,7 +410,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                     <button
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing ? 'text-violet-600 bg-violet-50 cursor-not-allowed' : 'text-gray-400 hover:text-violet-600 hover:bg-violet-50'}`}
                         onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
-                        title={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        title={t('accounts.test_model', '测试该账号')}
                         disabled={isRefreshing}
                     >
                         <FlaskConical className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />

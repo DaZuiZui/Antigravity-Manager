@@ -1,6 +1,8 @@
 
 
 import {
+  Bot,
+  Check,
   Download,
   LayoutGrid,
   List,
@@ -11,8 +13,10 @@ import {
   ToggleRight,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentType, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import AccountDetailsDialog from "../components/accounts/AccountDetailsDialog";
 import AccountGrid from "../components/accounts/AccountGrid";
 import AccountProxyDialog from "../components/accounts/AccountProxyDialog";
@@ -23,6 +27,7 @@ import ModalDialog from "../components/common/ModalDialog";
 import Pagination from "../components/common/Pagination";
 import AccountErrorDialog from "../components/accounts/AccountErrorDialog";
 import { showToast } from "../components/common/ToastContainer";
+import { MODEL_CONFIG, sortModels } from "../config/modelConfig";
 import { exportAccounts } from "../services/accountService";
 import { useAccountStore } from "../stores/useAccountStore";
 import { useConfigStore } from "../stores/useConfigStore";
@@ -34,6 +39,198 @@ import { useTranslation } from "react-i18next";
 
 type FilterType = "all" | "pro" | "ultra" | "free";
 type ViewMode = "list" | "grid";
+type TestModelOption = {
+  id: string;
+  label: string;
+  group: string;
+  percentage?: number;
+  supportsThinking?: boolean;
+  supportsImages?: boolean;
+  Icon: ComponentType<{ size?: number; className?: string }>;
+};
+
+const DEFAULT_TEST_MODEL_ID = "claude-sonnet-4-6";
+
+function inferModelGroup(modelId: string): string {
+  const lower = modelId.toLowerCase();
+  if (lower.startsWith("claude")) return "Claude";
+  if (lower.startsWith("gemini-3")) return "Gemini 3";
+  if (lower.startsWith("gemini-2.5")) return "Gemini 2.5";
+  if (lower.startsWith("gemini")) return "Gemini";
+  return "Custom";
+}
+
+function buildTestModelOptions(account?: Account | null): TestModelOption[] {
+  const optionMap = new Map<string, TestModelOption>();
+
+  account?.quota?.models?.forEach((model) => {
+    const id = model.name?.trim();
+    if (!id) return;
+
+    const config = MODEL_CONFIG[id.toLowerCase()];
+    optionMap.set(id.toLowerCase(), {
+      id,
+      label: model.display_name || config?.label || id,
+      group: config?.group || inferModelGroup(id),
+      percentage: model.percentage,
+      supportsThinking: model.supports_thinking,
+      supportsImages: model.supports_images,
+      Icon: config?.Icon || Bot,
+    });
+  });
+
+  if (optionMap.size === 0) {
+    Object.entries(MODEL_CONFIG).forEach(([id, config]) => {
+      optionMap.set(id, {
+        id,
+        label: config.label,
+        group: config.group,
+        Icon: config.Icon,
+      });
+    });
+  }
+
+  return sortModels(Array.from(optionMap.values()));
+}
+
+function getTestModelLabel(modelId: string, options: TestModelOption[]): string {
+  const option = options.find((item) => item.id === modelId);
+  return option?.label || MODEL_CONFIG[modelId.toLowerCase()]?.label || modelId;
+}
+
+function ModelTestDialog({
+  account,
+  options,
+  selectedModelId,
+  onSelect,
+  onClose,
+  onConfirm,
+}: {
+  account: Account | null;
+  options: TestModelOption[];
+  selectedModelId: string;
+  onSelect: (modelId: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+
+  if (!account) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-md animate-in fade-in duration-150"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="model-test-dialog-title"
+      onClick={onClose}
+    >
+      <div data-tauri-drag-region className="fixed left-0 right-0 top-0 h-8" />
+      <div
+        className="relative w-[min(92vw,480px)] overflow-hidden rounded-2xl border border-white/50 bg-white/90 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-base-100/90"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-base-300">
+          <div className="min-w-0">
+            <h3 id="model-test-dialog-title" className="truncate text-base font-bold text-gray-900 dark:text-base-content">
+              {t("accounts.test_modal_title", "选择测试模型")}
+            </h3>
+            <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" title={account.email}>
+              {account.custom_label || account.email}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-base-200 dark:hover:text-gray-200"
+            aria-label={t("common.cancel")}
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[55vh] space-y-2 overflow-y-auto p-4">
+          {options.map((option) => {
+            const selected = option.id === selectedModelId;
+            const Icon = option.Icon;
+
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all",
+                  selected
+                    ? "border-blue-300 bg-blue-50 text-blue-900 shadow-sm ring-2 ring-blue-500/15 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100"
+                    : "border-gray-200 bg-white/80 text-gray-700 hover:border-gray-300 hover:bg-white dark:border-base-300 dark:bg-base-200/60 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-base-200",
+                )}
+                onClick={() => onSelect(option.id)}
+              >
+                <span className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                  selected ? "bg-white text-blue-600 dark:bg-blue-500/15 dark:text-blue-200" : "bg-gray-100 text-gray-500 dark:bg-base-300 dark:text-gray-300",
+                )}>
+                  <Icon className="h-5 w-5" />
+                </span>
+
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{option.label}</span>
+                  <span className="block truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">{option.id}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-base-300 dark:text-gray-300">
+                      {option.group}
+                    </span>
+                    {typeof option.percentage === "number" && (
+                      <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                        {Math.round(option.percentage)}%
+                      </span>
+                    )}
+                    {option.supportsThinking && (
+                      <span className="rounded-md bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                        Thinking
+                      </span>
+                    )}
+                    {option.supportsImages && (
+                      <span className="rounded-md bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300">
+                        Image
+                      </span>
+                    )}
+                  </span>
+                </span>
+
+                <span className={cn(
+                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                  selected ? "border-blue-500 bg-blue-500 text-white" : "border-gray-300 dark:border-gray-600",
+                )}>
+                  {selected && <Check className="h-3.5 w-3.5" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-3 border-t border-gray-100 px-5 py-4 dark:border-base-300">
+          <button
+            type="button"
+            className="flex-1 rounded-xl bg-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-base-200 dark:text-gray-200 dark:hover:bg-base-300"
+            onClick={onClose}
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-500/15 transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!selectedModelId}
+            onClick={onConfirm}
+          >
+            {t("accounts.test_now", "开始测试")}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 const webBasePath = import.meta.env.BASE_URL === '/'
   ? ''
@@ -86,6 +283,17 @@ function Accounts() {
   const [isWarmuping, setIsWarmuping] = useState(false);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
   const [errorAccountId, setErrorAccountId] = useState<string | null>(null);
+  const [testAccountId, setTestAccountId] = useState<string | null>(null);
+  const [selectedTestModel, setSelectedTestModel] = useState<string>("");
+
+  const testAccount = useMemo(
+    () => accounts.find((account) => account.id === testAccountId) || null,
+    [accounts, testAccountId],
+  );
+  const testModelOptions = useMemo(
+    () => buildTestModelOptions(testAccount),
+    [testAccount],
+  );
 
   const handleWarmup = async (accountId: string) => {
     setRefreshingIds((prev) => {
@@ -394,7 +602,22 @@ function Accounts() {
     }
   };
 
-  const handleTestClaude = async (accountId: string) => {
+  const handleTestClaude = (accountId: string) => {
+    const account = accounts.find((item) => item.id === accountId) || null;
+    const options = buildTestModelOptions(account);
+    setSelectedTestModel(options[0]?.id || DEFAULT_TEST_MODEL_ID);
+    setTestAccountId(accountId);
+  };
+
+  const executeSelectedModelTest = async () => {
+    const accountId = testAccountId;
+    const modelId = selectedTestModel || testModelOptions[0]?.id || DEFAULT_TEST_MODEL_ID;
+    const modelLabel = getTestModelLabel(modelId, testModelOptions);
+
+    if (!accountId) return;
+
+    setTestAccountId(null);
+
     const apiKey = config?.proxy?.api_key;
     if (!apiKey) {
       showToast(t('accounts.test_missing_api_key', '未找到 API Key'), 'error');
@@ -421,7 +644,7 @@ function Accounts() {
           'x-api-key': apiKey,
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: modelId,
           max_tokens: 64,
           messages: [{ role: 'user', content: 'hi' }],
         }),
@@ -441,10 +664,10 @@ function Accounts() {
       }
 
       await fetchAccounts();
-      showToast(t('accounts.test_success', { message, defaultValue: `4.6 测试成功: ${message}` }), 'success');
+      showToast(t('accounts.test_success', { model: modelLabel, message, defaultValue: `${modelLabel} 测试成功: ${message}` }), 'success');
     } catch (error) {
       await fetchAccounts().catch(() => null);
-      showToast(`${t('accounts.test_failed', '4.6 测试失败')}: ${error}`, 'error');
+      showToast(`${t('accounts.test_failed', { model: modelLabel, defaultValue: `${modelLabel} 测试失败` })}: ${error}`, 'error');
     } finally {
       await invoke('set_preferred_account', { accountId: null }).catch(() => null);
       setRefreshingIds((prev) => {
@@ -1240,6 +1463,15 @@ function Accounts() {
         accounts={proxyAccount ? [proxyAccount] : []}
         autoBindAccountId={proxyAccount?.id}
         onClose={() => setProxyAccount(null)}
+      />
+
+      <ModelTestDialog
+        account={testAccount}
+        options={testModelOptions}
+        selectedModelId={selectedTestModel || testModelOptions[0]?.id || ""}
+        onSelect={setSelectedTestModel}
+        onClose={() => setTestAccountId(null)}
+        onConfirm={executeSelectedModelTest}
       />
 
       <ModalDialog

@@ -723,7 +723,7 @@ function AccountRowContent({
                     <button
                         className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${isRefreshing ? 'bg-violet-50 dark:bg-violet-900/10 text-violet-600 dark:text-violet-400 cursor-not-allowed' : 'hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
-                        title={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        title={t('accounts.test_model', '测试该账号')}
                         disabled={isRefreshing}
                     >
                         <FlaskConical className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />

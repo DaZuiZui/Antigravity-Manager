@@ -168,6 +168,12 @@
         "forbidden_badge": "403",
         "forbidden_tooltip": "API returned 403 Forbidden, account has no permission for Gemini Code Assist",
         "forbidden_msg": "Forbidden, skip auto-refresh",
+        "test_model": "Test this account",
+        "test_modal_title": "Select test model",
+        "test_now": "Start test",
+        "test_missing_api_key": "API Key not found",
+        "test_success": "{{model}} test succeeded: {{message}}",
+        "test_failed": "{{model}} test failed",
         "status": {
             "forbidden": "403 Forbidden",
             "disabled": "Account Disabled",
