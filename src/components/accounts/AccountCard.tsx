@@ -48,6 +48,83 @@ function formatWait(seconds?: number): string {
     return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+function getAccountStatus(account: Account, isDisabled: boolean, validationBlockedLabel: string, t: any) {
+    const wait = formatWait(account.rate_limit_reset_seconds);
+    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
+
+    if (isDisabled) {
+        return { tone: 'red', icon: Ban, label: t('accounts.status.disabled'), detail: account.disabled_reason };
+    }
+    if (account.proxy_disabled) {
+        return { tone: 'orange', icon: Ban, label: t('accounts.status.proxy_disabled'), detail: account.proxy_disabled_reason };
+    }
+    if (account.quota?.is_forbidden) {
+        return { tone: 'red', icon: Lock, label: t('accounts.forbidden'), detail: account.quota.forbidden_reason };
+    }
+    if (account.validation_blocked) {
+        return { tone: 'amber', icon: Clock, label: validationBlockedLabel, detail: account.validation_blocked_reason };
+    }
+    if (account.rate_limited || wait) {
+        return { tone: 'yellow', icon: Clock, label: t('accounts.rate_limited', '临时限流'), detail: wait ? t('accounts.rate_limit_wait', { time: wait, defaultValue: `剩余 ${wait}` }) : undefined };
+    }
+    if (hasClaudeProtection) {
+        return { tone: 'slate', icon: Lock, label: t('accounts.claude_protected', 'Claude 保护'), detail: t('accounts.claude_protected_tooltip', 'Claude is currently protected by quota/scheduler state.') };
+    }
+    return { tone: 'green', icon: Check, label: t('accounts.status.normal', '正常'), detail: t('accounts.status.normal_desc', '账号当前可参与调度') };
+}
+
+function StatusPill({ status }: { status: ReturnType<typeof getAccountStatus> }) {
+    const Icon = status.icon;
+    const toneClass = {
+        green: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-900/40',
+        red: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/40',
+        orange: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-900/40',
+        amber: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-900/40',
+        yellow: 'bg-yellow-50 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-900/40',
+        slate: 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700',
+    }[status.tone];
+
+    return (
+        <div className="flex flex-col items-start gap-1 min-w-0">
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-bold", toneClass)}>
+                <Icon className="w-3 h-3" />
+                {status.label}
+            </span>
+            {status.detail && <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight line-clamp-2">{status.detail}</span>}
+        </div>
+    );
+}
+
+function TooltipIconButton({
+    label,
+    className,
+    disabled,
+    onClick,
+    children,
+}: {
+    label: string;
+    className?: string;
+    disabled?: boolean;
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    children: React.ReactNode;
+}) {
+    return (
+        <span className="relative inline-flex group/tooltip">
+            <button
+                className={className}
+                onClick={onClick}
+                disabled={disabled}
+                aria-label={label}
+            >
+                {children}
+            </button>
+            <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/tooltip:opacity-100 dark:bg-white dark:text-gray-900">
+                {label}
+            </span>
+        </span>
+    );
+}
+
 function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
@@ -55,6 +132,8 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
     const validationBlockedLabel = getValidationBlockedStatusLabel(account.validation_blocked_reason, t);
     const rateLimitWait = formatWait(account.rate_limit_reset_seconds);
     const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
+    const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t);
+    const showClearCooldown = account.rate_limited || Boolean(account.rate_limit_reset_seconds) || hasClaudeProtection;
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -246,6 +325,23 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                 </div>
             </div>
 
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50/80 px-2 py-2 dark:border-base-300 dark:bg-base-200/50">
+                <div className="min-w-0">
+                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                        {t('accounts.table.status', '状态')}
+                    </div>
+                    <StatusPill status={status} />
+                </div>
+                {showClearCooldown && (
+                    <button
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-[10px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300"
+                        onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
+                    >
+                        <RotateCcw className="w-3 h-3" />
+                        {t('accounts.clear_cooldown', '解除冷却')}
+                    </button>
+                )}
+            </div>
 
             {/* 配额展示 */}
             <div className="flex-1 px-2 mb-2 overflow-y-auto scrollbar-none">
@@ -321,23 +417,24 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                     </div>
                 )}
                 <div className="flex flex-wrap items-center justify-center gap-1 w-full">
-                    <button
+                    <TooltipIconButton
+                        label={t('common.details')}
                         className="p-1.5 text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
-                        title={t('common.details')}
                     >
                         <Info className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('accounts.device_fingerprint')}
                         className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDevice(); }}
-                        title={t('accounts.device_fingerprint')}
                     >
                         <Fingerprint className="w-3.5 h-3.5" />
-                    </button>
+                    </TooltipIconButton>
                     {/* 自定义标签按钮 */}
                     {onUpdateLabel && (
-                        <button
+                        <TooltipIconButton
+                            label={t('accounts.edit_label', 'Edit Label')}
                             className={cn(
                                 "p-1.5 rounded-lg transition-all",
                                 account.custom_label
@@ -345,77 +442,77 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                                     : "text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30"
                             )}
                             onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
-                            title={t('accounts.edit_label', 'Edit Label')}
                         >
                             <Tag className="w-3.5 h-3.5" />
-                        </button>
+                        </TooltipIconButton>
                     )}
-                    <button
+                    <TooltipIconButton
+                        label={isDisabled ? t('accounts.disabled_tooltip') : (isSwitching ? t('common.loading') : t('accounts.switch_to_classic', '切换到 Antigravity (经典版)'))}
                         className={`p-1.5 rounded-lg transition-all ${(isSwitching || isDisabled) ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onSwitch(); }}
-                        title={isDisabled ? t('accounts.disabled_tooltip') : (isSwitching ? t('common.loading') : t('accounts.switch_to_classic', '切换到 Antigravity (经典版)'))}
                         disabled={isSwitching || isDisabled}
                     >
                         <ArrowRightLeft className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={isDisabled ? t('accounts.disabled_tooltip') : (isSwitching ? t('common.loading') : t('accounts.switch_to_ide', '切换到 Antigravity IDE'))}
                         className={`p-1.5 rounded-lg transition-all ${(isSwitching || isDisabled) ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onSwitch('ide'); }}
-                        title={isDisabled ? t('accounts.disabled_tooltip') : (isSwitching ? t('common.loading') : t('accounts.switch_to_ide', '切换到 Antigravity IDE'))}
                         disabled={isSwitching || isDisabled}
                     >
                         <Repeat2 className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
-                    </button>
+                    </TooltipIconButton>
                     {onWarmup && (
-                        <button
+                        <TooltipIconButton
+                            label={isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.loading') : t('accounts.warmup_this', '预热该账号'))}
                             className={`p-1.5 rounded-lg transition-all ${(isRefreshing || isDisabled) ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30'}`}
                             onClick={(e) => { e.stopPropagation(); onWarmup(); }}
-                            title={isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.loading') : t('accounts.warmup_this', '预热该账号'))}
                             disabled={isRefreshing || isDisabled}
                         >
                             <Sparkles className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
-                        </button>
+                        </TooltipIconButton>
                     )}
-                    <button
+                    <TooltipIconButton
+                        label={isDisabled ? t('accounts.disabled_tooltip') : t('common.refresh')}
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing
                             ? 'text-green-600 bg-green-50'
                             : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
                         onClick={(e) => { e.stopPropagation(); onRefresh(); }}
                         disabled={isRefreshing || isDisabled}
-                        title={isDisabled ? t('accounts.disabled_tooltip') : t('common.refresh')}
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('common.export')}
                         className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onExport(); }}
-                        title={t('common.export')}
                     >
                         <Download className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('accounts.proxy.configure', 'Configure proxy')}
                         className="p-1.5 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onConfigureProxy(); }}
-                        title={t('accounts.proxy.configure', 'Configure proxy')}
                     >
                         <Network className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('accounts.clear_limit', '解除限流/冻结')}
                         className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
-                        title={t('accounts.clear_limit', '解除限流/冻结')}
                     >
                         <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('accounts.test_model', '测试该账号')}
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing ? 'text-violet-600 bg-violet-50 cursor-not-allowed' : 'text-gray-400 hover:text-violet-600 hover:bg-violet-50'}`}
                         onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
-                        title={t('accounts.test_claude_46', '用 4.6 测试该账号')}
                         disabled={isRefreshing}
                     >
                         <FlaskConical className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={account.proxy_disabled ? t('accounts.enable_proxy') : t('accounts.disable_proxy')}
                         className={cn(
                             "p-1.5 rounded-lg transition-all",
                             account.proxy_disabled
@@ -423,21 +520,20 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                                 : "text-gray-400 hover:text-orange-600 hover:bg-orange-50"
                         )}
                         onClick={(e) => { e.stopPropagation(); onToggleProxy(); }}
-                        title={account.proxy_disabled ? t('accounts.enable_proxy') : t('accounts.disable_proxy')}
                     >
                         {account.proxy_disabled ? (
                             <ToggleRight className="w-3.5 h-3.5" />
                         ) : (
                             <ToggleLeft className="w-3.5 h-3.5" />
                         )}
-                    </button>
-                    <button
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                        label={t('common.delete')}
                         className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        title={t('common.delete')}
                     >
                         <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    </TooltipIconButton>
                 </div>
             </div>
         </div >

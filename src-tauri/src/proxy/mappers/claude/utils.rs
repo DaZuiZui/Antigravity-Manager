@@ -18,7 +18,12 @@ pub fn get_context_limit_for_model(model: &str) -> u32 {
     }
 }
 
-pub fn to_claude_usage(usage_metadata: &super::models::UsageMetadata, scaling_enabled: bool, context_limit: u32) -> super::models::Usage {
+pub fn to_claude_usage(
+    usage_metadata: &super::models::UsageMetadata,
+    scaling_enabled: bool,
+    context_limit: u32,
+    cache_key: Option<&str>,
+) -> super::models::Usage {
     let prompt_tokens = usage_metadata.prompt_token_count.unwrap_or(0);
     let cached_tokens = usage_metadata.cached_content_token_count.unwrap_or(0);
 
@@ -75,11 +80,14 @@ pub fn to_claude_usage(usage_metadata: &super::models::UsageMetadata, scaling_en
         let display_ratio = scaled_total as f64 / 195_000.0;
         tracing::debug!(
             "[Claude-Scaling] Raw: {} ({:.1}%), Display: {} ({:.1}%), Compression: {:.1}x",
-            total_raw, ratio * 100.0, scaled_total, display_ratio * 100.0,
+            total_raw,
+            ratio * 100.0,
+            scaled_total,
+            display_ratio * 100.0,
             total_raw as f64 / scaled_total as f64
         );
     }
-    
+
     // 按比例分配缩放后的总量到 input 和 cache_read
     let (reported_input, reported_cache) = if total_raw > 0 {
         let cache_ratio = (cached_tokens as f64) / (total_raw as f64);
@@ -88,12 +96,107 @@ pub fn to_claude_usage(usage_metadata: &super::models::UsageMetadata, scaling_en
     } else {
         (scaled_total, None)
     };
-    
+
+    let output_tokens = usage_metadata.candidates_token_count.unwrap_or(0);
+    let settings = crate::proxy::usage_cache::normalized_cache_settings();
+
+    if settings.enabled {
+        let original_input_tokens = scaled_total;
+        let original_total_tokens = original_input_tokens + output_tokens;
+
+        if reported_cache.unwrap_or(0) > 0 {
+            crate::proxy::usage_cache::record_observed_cache_state(
+                cache_key,
+                reported_cache.unwrap_or(0),
+                0,
+                0,
+            );
+
+            return super::models::Usage {
+                input_tokens: crate::proxy::usage_cache::multiply_token_count(
+                    reported_input,
+                    settings.read_multiplier,
+                ),
+                output_tokens: crate::proxy::usage_cache::multiply_token_count(
+                    output_tokens,
+                    settings.write_multiplier,
+                ),
+                cache_read_input_tokens: Some(crate::proxy::usage_cache::multiply_token_count(
+                    reported_cache.unwrap_or(0),
+                    settings.cache_read_multiplier,
+                )),
+                cache_creation_input_tokens: Some(0),
+                cache_creation: None,
+                claude_cache_creation_5_m_tokens: None,
+                claude_cache_creation_1_h_tokens: None,
+                original_input_tokens: Some(original_input_tokens),
+                original_output_tokens: Some(output_tokens),
+                original_completion_tokens: Some(output_tokens),
+                original_total_tokens: Some(original_total_tokens),
+                server_tool_use: None,
+            };
+        }
+
+        let split = crate::proxy::usage_cache::build_fake_cache_split(scaled_total, cache_key);
+        return super::models::Usage {
+            input_tokens: crate::proxy::usage_cache::multiply_token_count(
+                split.input_tokens,
+                settings.read_multiplier,
+            ),
+            output_tokens: crate::proxy::usage_cache::multiply_token_count(
+                output_tokens,
+                settings.write_multiplier,
+            ),
+            cache_read_input_tokens: Some(crate::proxy::usage_cache::multiply_token_count(
+                split.cache_read_tokens,
+                settings.cache_read_multiplier,
+            )),
+            cache_creation_input_tokens: Some(crate::proxy::usage_cache::multiply_token_count(
+                split.cache_write_tokens,
+                settings.cache_write_multiplier,
+            )),
+            cache_creation: Some(super::models::CacheCreationUsage {
+                ephemeral_5m_input_tokens: crate::proxy::usage_cache::multiply_token_count(
+                    split.cache_write_5m_tokens,
+                    settings.cache_write_multiplier,
+                ),
+                ephemeral_1h_input_tokens: crate::proxy::usage_cache::multiply_token_count(
+                    split.cache_write_1h_tokens,
+                    settings.cache_write_multiplier,
+                ),
+            }),
+            claude_cache_creation_5_m_tokens: Some(
+                crate::proxy::usage_cache::multiply_token_count(
+                    split.cache_write_5m_tokens,
+                    settings.cache_write_multiplier,
+                ),
+            ),
+            claude_cache_creation_1_h_tokens: Some(
+                crate::proxy::usage_cache::multiply_token_count(
+                    split.cache_write_1h_tokens,
+                    settings.cache_write_multiplier,
+                ),
+            ),
+            original_input_tokens: Some(original_input_tokens),
+            original_output_tokens: Some(output_tokens),
+            original_completion_tokens: Some(output_tokens),
+            original_total_tokens: Some(original_total_tokens),
+            server_tool_use: None,
+        };
+    }
+
     super::models::Usage {
         input_tokens: reported_input,
-        output_tokens: usage_metadata.candidates_token_count.unwrap_or(0),
+        output_tokens,
         cache_read_input_tokens: reported_cache,
         cache_creation_input_tokens: Some(0),
+        cache_creation: None,
+        claude_cache_creation_5_m_tokens: None,
+        claude_cache_creation_1_h_tokens: None,
+        original_input_tokens: None,
+        original_output_tokens: None,
+        original_completion_tokens: None,
+        original_total_tokens: None,
         server_tool_use: None,
     }
 }
@@ -108,6 +211,10 @@ mod tests {
     #[test]
     fn test_to_claude_usage() {
         use super::super::models::UsageMetadata;
+        crate::proxy::update_cache_management_config(crate::proxy::config::CacheManagementConfig {
+            enabled: false,
+            ..Default::default()
+        });
 
         let usage = UsageMetadata {
             prompt_token_count: Some(100),
@@ -116,7 +223,7 @@ mod tests {
             cached_content_token_count: None,
         };
 
-        let claude_usage = to_claude_usage(&usage, true, 1_000_000);
+        let claude_usage = to_claude_usage(&usage, true, 1_000_000, None);
         // 100 tokens is < 30k, minimal scaling
         assert!(claude_usage.input_tokens < 200);
         assert_eq!(claude_usage.output_tokens, 50);
@@ -128,7 +235,7 @@ mod tests {
             total_token_count: Some(500_010),
             cached_content_token_count: None,
         };
-        let res_50 = to_claude_usage(&usage_50, true, 1_000_000);
+        let res_50 = to_claude_usage(&usage_50, true, 1_000_000, None);
         // 50% * 0.6 = 30% of 195k = 58,500
         assert!(res_50.input_tokens > 55_000 && res_50.input_tokens < 62_000);
 
@@ -139,7 +246,7 @@ mod tests {
             total_token_count: Some(700_010),
             cached_content_token_count: None,
         };
-        let res_70 = to_claude_usage(&usage_70, true, 1_000_000);
+        let res_70 = to_claude_usage(&usage_70, true, 1_000_000, None);
         // 50% of 195k = 97,500
         assert!(res_70.input_tokens > 90_000 && res_70.input_tokens < 105_000);
 
@@ -150,7 +257,7 @@ mod tests {
             total_token_count: Some(850_010),
             cached_content_token_count: None,
         };
-        let res_85 = to_claude_usage(&usage_85, true, 1_000_000);
+        let res_85 = to_claude_usage(&usage_85, true, 1_000_000, None);
         // 70% of 195k = 136,500
         assert!(res_85.input_tokens > 130_000 && res_85.input_tokens < 145_000);
 
@@ -161,7 +268,7 @@ mod tests {
             total_token_count: Some(1_000_010),
             cached_content_token_count: None,
         };
-        let res_100 = to_claude_usage(&usage_100, true, 1_000_000);
+        let res_100 = to_claude_usage(&usage_100, true, 1_000_000, None);
         // 97% of 195k = 189,150
         assert!(res_100.input_tokens > 185_000 && res_100.input_tokens <= 190_000);
     }

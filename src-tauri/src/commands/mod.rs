@@ -124,7 +124,9 @@ pub async fn switch_account(
         crate::modules::integration::SystemManager::Desktop(app.clone()),
     );
 
-    service.switch_account(&account_id, target_ide.as_deref()).await?;
+    service
+        .switch_account(&account_id, target_ide.as_deref())
+        .await?;
 
     // 同步托盘
     crate::modules::tray::update_tray_menus(&app);
@@ -377,6 +379,8 @@ pub async fn save_config(
         crate::proxy::update_global_system_prompt_config(config.proxy.global_system_prompt.clone());
         // [NEW] 更新全局图像思维模式配置
         crate::proxy::update_image_thinking_mode(config.proxy.image_thinking_mode.clone());
+        // [NEW] 更新缓存管理配置
+        crate::proxy::update_cache_management_config(config.proxy.cache_management.clone());
         // 更新代理池配置
         instance
             .axum_server
@@ -396,7 +400,10 @@ pub async fn save_config(
 // --- OAuth 命令 ---
 
 #[tauri::command]
-pub async fn start_oauth_login(app_handle: tauri::AppHandle, oauth_client_key: Option<String>) -> Result<Account, String> {
+pub async fn start_oauth_login(
+    app_handle: tauri::AppHandle,
+    oauth_client_key: Option<String>,
+) -> Result<Account, String> {
     modules::logger::log_info("开始 OAuth 授权流程...");
     let service = modules::account_service::AccountService::new(
         crate::modules::integration::SystemManager::Desktop(app_handle.clone()),
@@ -440,7 +447,10 @@ pub async fn complete_oauth_login(app_handle: tauri::AppHandle) -> Result<Accoun
 
 /// 预生成 OAuth 授权链接 (不打开浏览器)
 #[tauri::command]
-pub async fn prepare_oauth_url(app_handle: tauri::AppHandle, oauth_client_key: Option<String>) -> Result<String, String> {
+pub async fn prepare_oauth_url(
+    app_handle: tauri::AppHandle,
+    oauth_client_key: Option<String>,
+) -> Result<String, String> {
     let service = modules::account_service::AccountService::new(
         crate::modules::integration::SystemManager::Desktop(app_handle.clone()),
     );
@@ -461,7 +471,8 @@ pub async fn submit_oauth_code(code: String, state: Option<String>) -> Result<()
 }
 
 #[tauri::command]
-pub async fn list_oauth_clients() -> Result<Vec<crate::modules::oauth::OAuthClientDescriptor>, String> {
+pub async fn list_oauth_clients(
+) -> Result<Vec<crate::modules::oauth::OAuthClientDescriptor>, String> {
     crate::modules::oauth::list_oauth_clients()
 }
 
@@ -760,7 +771,6 @@ pub async fn update_last_check_time() -> Result<(), String> {
     crate::modules::update_checker::update_last_check_time()
 }
 
-
 /// 检测是否通过 Homebrew Cask 安装
 #[tauri::command]
 pub async fn check_homebrew_installation() -> Result<bool, String> {
@@ -773,7 +783,6 @@ pub async fn brew_upgrade_cask() -> Result<String, String> {
     modules::logger::log_info("收到前端触发的 Homebrew 升级请求");
     crate::modules::update_checker::brew_upgrade_cask().await
 }
-
 
 /// 获取更新设置
 #[tauri::command]
@@ -878,6 +887,36 @@ pub async fn toggle_proxy_status(
     crate::modules::tray::update_tray_menus(&app);
 
     Ok(())
+}
+
+/// 清除账号上一次 403/验证/模型保护留下的陈旧状态。
+/// 仅在用户手动测试模型成功后调用，不会清除 invalid_grant 等真正禁用状态。
+#[tauri::command]
+pub async fn clear_account_error_state(
+    app: tauri::AppHandle,
+    proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+    account_id: String,
+    model_id: Option<String>,
+) -> Result<bool, String> {
+    let changed = modules::account::clear_account_error_state_after_success(
+        &account_id,
+        model_id.as_deref(),
+    )?;
+
+    if changed {
+        let instance_lock = proxy_state.instance.read().await;
+        if let Some(instance) = instance_lock.as_ref() {
+            instance
+                .token_manager
+                .reload_account(&account_id)
+                .await
+                .map_err(|e| format!("同步账号失败: {}", e))?;
+        }
+
+        crate::modules::tray::update_tray_menus(&app);
+    }
+
+    Ok(changed)
 }
 
 /// 预热所有可用账号

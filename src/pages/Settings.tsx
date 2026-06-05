@@ -17,13 +17,14 @@ import { relaunch } from '@tauri-apps/plugin-process';
 
 import DebugConsole from '../components/debug/DebugConsole';
 import ProxyPoolSettings from '../components/settings/ProxyPoolSettings';
+import CacheManagement from '../components/settings/CacheManagement';
 
 
 function Settings() {
     const { t, i18n } = useTranslation();
     const { config, loadConfig, saveConfig, updateLanguage, updateTheme } = useConfigStore();
     const { enable, disable, isEnabled } = useDebugConsole();
-    const [activeTab, setActiveTab] = useState<'general' | 'account' | 'proxy' | 'advanced' | 'debug' | 'about'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'account' | 'proxy' | 'cache' | 'advanced' | 'debug' | 'about'>('general');
     const [formData, setFormData] = useState<AppConfig>({
         language: 'zh',
         theme: 'system',
@@ -46,6 +47,20 @@ function Settings() {
                 enabled: false,
                 output_dir: undefined
             } as { enabled: boolean; output_dir?: string },
+            cache_management: {
+                enabled: true,
+                min_ratio: 0.75,
+                max_ratio: 0.85,
+                read_split_min_ratio: 0.75,
+                read_split_max_ratio: 0.85,
+                read_multiplier: 1,
+                write_multiplier: 1,
+                cache_read_multiplier: 1,
+                cache_write_multiplier: 1,
+                state_ttl_seconds: 300,
+                one_hour_state_ttl_seconds: 3600,
+                one_hour_write_ratio: 0.2
+            },
             proxy_pool: {
                 enabled: false,
                 proxies: [],
@@ -395,6 +410,15 @@ function Settings() {
                             onClick={() => setActiveTab('proxy')}
                         >
                             {t('settings.tabs.proxy')}
+                        </button>
+                        <button
+                            className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${activeTab === 'cache'
+                                ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                                }`}
+                            onClick={() => setActiveTab('cache')}
+                        >
+                            {t('settings.tabs.cache_management')}
                         </button>
                         <button
                             className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${activeTab === 'advanced'
@@ -1287,6 +1311,35 @@ function Settings() {
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {/* 缓存管理 */}
+                    {activeTab === 'cache' && (
+                        <div className="space-y-4 animate-in fade-in duration-300">
+                            <CacheManagement
+                                config={formData.proxy?.cache_management || {
+                                    enabled: true,
+                                    min_ratio: 0.75,
+                                    max_ratio: 0.85,
+                                    read_split_min_ratio: 0.75,
+                                    read_split_max_ratio: 0.85,
+                                    read_multiplier: 1,
+                                    write_multiplier: 1,
+                                    cache_read_multiplier: 1,
+                                    cache_write_multiplier: 1,
+                                    state_ttl_seconds: 300,
+                                    one_hour_state_ttl_seconds: 3600,
+                                    one_hour_write_ratio: 0.2
+                                }}
+                                onChange={(newConfig) => setFormData({
+                                    ...formData,
+                                    proxy: {
+                                        ...formData.proxy,
+                                        cache_management: newConfig
+                                    }
+                                })}
+                            />
                         </div>
                     )}
 

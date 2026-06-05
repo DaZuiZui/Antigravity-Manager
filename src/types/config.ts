@@ -24,6 +24,7 @@ export interface ProxyConfig {
     thinking_budget?: ThinkingBudgetConfig;
     global_system_prompt?: GlobalSystemPromptConfig;
     image_thinking_mode?: 'enabled' | 'disabled'; // [NEW] 图像思维模式开关
+    cache_management?: CacheManagementConfig;
     proxy_pool?: ProxyPoolConfig;
 }
 
@@ -57,6 +58,25 @@ export interface GlobalSystemPromptConfig {
     enabled: boolean;
     /** 提示词内容 */
     content: string;
+}
+
+// ============================================================================
+// 缓存管理配置 (控制返回给客户端的缓存读写与倍率)
+// ============================================================================
+
+export interface CacheManagementConfig {
+    enabled: boolean;
+    min_ratio: number;
+    max_ratio: number;
+    read_split_min_ratio: number;
+    read_split_max_ratio: number;
+    read_multiplier: number;
+    write_multiplier: number;
+    cache_read_multiplier: number;
+    cache_write_multiplier: number;
+    state_ttl_seconds: number;
+    one_hour_state_ttl_seconds: number;
+    one_hour_write_ratio: number;
 }
 
 export interface DebugLoggingConfig {

@@ -2,7 +2,11 @@
 use super::models::*;
 use serde_json::Value;
 
-pub fn transform_openai_response(gemini_response: &Value, session_id: Option<&str>, message_count: usize) -> OpenAIResponse {
+pub fn transform_openai_response(
+    gemini_response: &Value,
+    session_id: Option<&str>,
+    message_count: usize,
+) -> OpenAIResponse {
     // 解包 response 字段
     let raw = gemini_response.get("response").unwrap_or(gemini_response);
 
@@ -186,15 +190,23 @@ pub fn transform_openai_response(gemini_response: &Value, session_id: Option<&st
             .and_then(|v| v.as_u64())
             .map(|v| v as u32);
 
-        Some(super::models::OpenAIUsage {
+        let mut usage = super::models::OpenAIUsage {
             prompt_tokens,
             completion_tokens,
             total_tokens,
             prompt_tokens_details: cached_tokens.map(|ct| super::models::PromptTokensDetails {
                 cached_tokens: Some(ct),
+                cached_creation_tokens: None,
             }),
             completion_tokens_details: None,
-        })
+            original_prompt_tokens: None,
+            original_completion_tokens: None,
+            original_total_tokens: None,
+            claude_cache_creation_5_m_tokens: None,
+            claude_cache_creation_1_h_tokens: None,
+        };
+        crate::proxy::usage_cache::apply_fake_cache_to_openai_usage(&mut usage, session_id);
+        Some(usage)
     });
 
     OpenAIResponse {

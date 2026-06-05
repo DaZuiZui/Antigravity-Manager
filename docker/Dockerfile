@@ -1,5 +1,9 @@
+ARG NODE_IMAGE=node:20-slim
+ARG RUST_IMAGE=rust:1-slim-bookworm
+ARG DEBIAN_IMAGE=debian:bookworm-slim
+
 # --- Frontend Build Stage ---
-FROM node:20-slim AS frontend-builder
+FROM ${NODE_IMAGE} AS frontend-builder
 ARG USE_MIRROR=auto
 WORKDIR /app
 
@@ -21,7 +25,7 @@ COPY src-tauri/icons ./src-tauri/icons
 RUN npm run build
 
 # --- Backend Build Stage ---
-FROM rust:1-slim-bookworm AS backend-builder
+FROM ${RUST_IMAGE} AS backend-builder
 ARG USE_MIRROR=auto
 
 # Conditionally use Aliyun mirror for APT
@@ -33,8 +37,12 @@ RUN if [ "$USE_MIRROR" = "true" ] || ( [ "$USE_MIRROR" = "auto" ] && ! timeout 3
     echo "Using default APT sources..."; \
     fi
 
+# Keep small disks from running frontend and backend package installs in parallel.
+RUN --mount=from=frontend-builder,source=/app/dist,target=/tmp/frontend-dist,readonly \
+    test -d /tmp/frontend-dist
+
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     build-essential \
     curl \
@@ -87,7 +95,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     cp target/release/antigravity_tools /tmp/antigravity_tools
 
 # --- Final Runtime Stage ---
-FROM debian:bookworm-slim
+FROM ${DEBIAN_IMAGE}
 ARG USE_MIRROR=auto
 WORKDIR /app
 
@@ -100,8 +108,13 @@ RUN if [ "$USE_MIRROR" = "true" ] || ( [ "$USE_MIRROR" = "auto" ] && ! timeout 3
     echo "Using default APT sources..."; \
     fi
 
+# Keep runtime package installation after builders finish on small disks.
+RUN --mount=from=frontend-builder,source=/app/dist,target=/tmp/frontend-dist,readonly \
+    --mount=from=backend-builder,source=/tmp/antigravity_tools,target=/tmp/antigravity_tools,readonly \
+    test -d /tmp/frontend-dist && test -f /tmp/antigravity_tools
+
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     libsqlite3-0 \
     ca-certificates \

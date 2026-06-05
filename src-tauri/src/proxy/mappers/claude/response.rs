@@ -250,8 +250,11 @@ impl NonStreamingProcessor {
         // [FIX #765] Cache signature in NonStreamingProcessor
         if let Some(sig) = &signature {
             if let Some(s_id) = &self.session_id {
-                crate::proxy::SignatureCache::global()
-                    .cache_session_signature(s_id, sig.to_string(), self.message_count);
+                crate::proxy::SignatureCache::global().cache_session_signature(
+                    s_id,
+                    sig.to_string(),
+                    self.message_count,
+                );
                 crate::proxy::SignatureCache::global()
                     .cache_thinking_family(sig.to_string(), self.model_name.clone());
                 tracing::debug!(
@@ -513,12 +516,26 @@ impl NonStreamingProcessor {
         let usage = gemini_response
             .usage_metadata
             .as_ref()
-            .map(|u| to_claude_usage(u, self.scaling_enabled, self.context_limit))
+            .map(|u| {
+                to_claude_usage(
+                    u,
+                    self.scaling_enabled,
+                    self.context_limit,
+                    self.session_id.as_deref(),
+                )
+            })
             .unwrap_or(Usage {
                 input_tokens: 0,
                 output_tokens: 0,
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                cache_creation: None,
+                claude_cache_creation_5_m_tokens: None,
+                claude_cache_creation_1_h_tokens: None,
+                original_input_tokens: None,
+                original_output_tokens: None,
+                original_completion_tokens: None,
+                original_total_tokens: None,
                 server_tool_use: None,
             });
 
