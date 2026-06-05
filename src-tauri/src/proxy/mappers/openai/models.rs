@@ -56,7 +56,6 @@ pub struct ThinkingConfig {
     pub effort: Option<String>, // "low", "high", or "max"
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseFormat {
     pub r#type: String,
@@ -147,12 +146,24 @@ pub struct OpenAIUsage {
     pub prompt_tokens_details: Option<PromptTokensDetails>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_tokens_details: Option<CompletionTokensDetails>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_prompt_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_total_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_cache_creation_5_m_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_cache_creation_1_h_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptTokensDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_creation_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

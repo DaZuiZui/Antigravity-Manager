@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import AddAccountDialog from '../components/accounts/AddAccountDialog';
 import { showToast } from '../components/common/ToastContainer';
+import AccountHealthMap from '../components/dashboard/AccountHealthMap';
 import BestAccounts from '../components/dashboard/BestAccounts';
 import CurrentAccount from '../components/dashboard/CurrentAccount';
 import { exportAccounts } from '../services/accountService';
@@ -282,6 +283,11 @@ function Dashboard() {
                         <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{t('dashboard.quota_desc')}</div>
                     </div>
                 </div>
+
+                <AccountHealthMap
+                    accounts={accounts}
+                    currentAccountId={currentAccount?.id}
+                />
 
                 {/* 双栏布局 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

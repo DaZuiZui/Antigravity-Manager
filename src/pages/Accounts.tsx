@@ -35,6 +35,7 @@ import { Account } from "../types/account";
 import { cn } from "../utils/cn";
 import { isTauri } from "../utils/env";
 import { request as invoke } from "../utils/request";
+import { webBasePath } from "../utils/webBasePath";
 import { useTranslation } from "react-i18next";
 
 type FilterType = "all" | "pro" | "ultra" | "free";
@@ -231,10 +232,6 @@ function ModelTestDialog({
     document.body,
   );
 }
-
-const webBasePath = import.meta.env.BASE_URL === '/'
-  ? ''
-  : import.meta.env.BASE_URL.replace(/\/$/, '');
 
 function Accounts() {
   const { t } = useTranslation();
@@ -589,6 +586,7 @@ function Accounts() {
       await invoke('clear_proxy_rate_limit', { accountId }).catch(() => null);
       await invoke('clear_proxy_session_bindings').catch(() => null);
       await refreshQuota(accountId).catch(() => null);
+      await invoke('clear_account_error_state', { accountId, modelId: null }).catch(() => null);
       await fetchAccounts();
       showToast(t('accounts.limit_cleared', '已解除该账号的限流/冻结记录'), 'success');
     } catch (error) {
@@ -663,6 +661,7 @@ function Accounts() {
         // Keep plain-text responses.
       }
 
+      await invoke('clear_account_error_state', { accountId, modelId }).catch(() => null);
       await fetchAccounts();
       showToast(t('accounts.test_success', { model: modelLabel, message, defaultValue: `${modelLabel} 测试成功: ${message}` }), 'success');
     } catch (error) {

@@ -274,6 +274,8 @@ pub async fn ensure_admin_server(
     crate::proxy::update_global_system_prompt_config(config.global_system_prompt.clone());
     // [NEW] 初始化全局图像思维模式配置
     crate::proxy::update_image_thinking_mode(config.image_thinking_mode.clone());
+    // [NEW] 初始化全局缓存管理配置
+    crate::proxy::update_cache_management_config(config.cache_management.clone());
 
     Ok(())
 }

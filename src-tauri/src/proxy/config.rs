@@ -121,6 +121,69 @@ pub fn update_image_thinking_mode(mode: Option<String>) {
     }
 }
 
+// ============================================================================
+// 全局缓存管理配置存储
+// 用于响应转换阶段合成/调整 prompt cache 用量。
+// ============================================================================
+static GLOBAL_CACHE_MANAGEMENT_CONFIG: OnceLock<RwLock<CacheManagementConfig>> = OnceLock::new();
+
+/// 获取当前缓存管理配置
+pub fn get_cache_management_config() -> CacheManagementConfig {
+    GLOBAL_CACHE_MANAGEMENT_CONFIG
+        .get()
+        .and_then(|lock| lock.read().ok())
+        .map(|cfg| cfg.clone())
+        .unwrap_or_default()
+}
+
+#[cfg(not(test))]
+fn load_persisted_cache_management_config() -> Option<CacheManagementConfig> {
+    match crate::modules::config::load_app_config() {
+        Ok(app_config) => Some(app_config.proxy.cache_management),
+        Err(err) => {
+            tracing::warn!(
+                "[Cache-Management] Failed to read persisted config, using provided runtime config: {}",
+                err
+            );
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+fn load_persisted_cache_management_config() -> Option<CacheManagementConfig> {
+    None
+}
+
+/// 更新全局缓存管理配置
+pub fn update_cache_management_config(config: CacheManagementConfig) {
+    let config = load_persisted_cache_management_config().unwrap_or(config);
+
+    if let Some(lock) = GLOBAL_CACHE_MANAGEMENT_CONFIG.get() {
+        if let Ok(mut cfg) = lock.write() {
+            *cfg = config.clone();
+            tracing::info!(
+                "[Cache-Management] Config updated: enabled={}, range={:.2}-{:.2}, multipliers r/w/cr/cw={:.2}/{:.2}/{:.2}/{:.2}",
+                config.enabled,
+                config.min_ratio,
+                config.max_ratio,
+                config.read_multiplier,
+                config.write_multiplier,
+                config.cache_read_multiplier,
+                config.cache_write_multiplier,
+            );
+        }
+    } else {
+        let _ = GLOBAL_CACHE_MANAGEMENT_CONFIG.set(RwLock::new(config.clone()));
+        tracing::info!(
+            "[Cache-Management] Config initialized: enabled={}, range={:.2}-{:.2}",
+            config.enabled,
+            config.min_ratio,
+            config.max_ratio,
+        );
+    }
+}
+
 /// 全局系统提示词配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalSystemPromptConfig {
@@ -370,6 +433,114 @@ fn default_false() -> bool {
     false
 }
 
+fn default_cache_management_enabled() -> bool {
+    true
+}
+
+fn default_fake_cache_min_ratio() -> f64 {
+    0.75
+}
+
+fn default_fake_cache_max_ratio() -> f64 {
+    0.85
+}
+
+fn default_fake_cache_read_split_min_ratio() -> f64 {
+    0.75
+}
+
+fn default_fake_cache_read_split_max_ratio() -> f64 {
+    0.85
+}
+
+fn default_usage_multiplier() -> f64 {
+    1.0
+}
+
+fn default_fake_cache_state_ttl_seconds() -> u64 {
+    300
+}
+
+fn default_fake_cache_one_hour_state_ttl_seconds() -> u64 {
+    3600
+}
+
+fn default_fake_cache_one_hour_write_ratio() -> f64 {
+    0.20
+}
+
+/// 缓存管理配置
+/// 控制返回给客户端的普通读写、缓存读写 token 拆分和倍率。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheManagementConfig {
+    /// 是否启用缓存管理
+    #[serde(default = "default_cache_management_enabled")]
+    pub enabled: bool,
+
+    /// 合成缓存占原始输入 token 的最小比例
+    #[serde(default = "default_fake_cache_min_ratio")]
+    pub min_ratio: f64,
+
+    /// 合成缓存占原始输入 token 的最大比例
+    #[serde(default = "default_fake_cache_max_ratio")]
+    pub max_ratio: f64,
+
+    /// 合成缓存中计为缓存读的最小比例（无稳定会话 key 时使用）
+    #[serde(default = "default_fake_cache_read_split_min_ratio")]
+    pub read_split_min_ratio: f64,
+
+    /// 合成缓存中计为缓存读的最大比例（无稳定会话 key 时使用）
+    #[serde(default = "default_fake_cache_read_split_max_ratio")]
+    pub read_split_max_ratio: f64,
+
+    /// 普通读 token 倍率
+    #[serde(default = "default_usage_multiplier")]
+    pub read_multiplier: f64,
+
+    /// 普通写 token 倍率
+    #[serde(default = "default_usage_multiplier")]
+    pub write_multiplier: f64,
+
+    /// 缓存读 token 倍率
+    #[serde(default = "default_usage_multiplier")]
+    pub cache_read_multiplier: f64,
+
+    /// 缓存写 token 倍率
+    #[serde(default = "default_usage_multiplier")]
+    pub cache_write_multiplier: f64,
+
+    /// 5 分钟缓存状态 TTL
+    #[serde(default = "default_fake_cache_state_ttl_seconds")]
+    pub state_ttl_seconds: u64,
+
+    /// 1 小时缓存状态 TTL
+    #[serde(default = "default_fake_cache_one_hour_state_ttl_seconds")]
+    pub one_hour_state_ttl_seconds: u64,
+
+    /// 新增缓存写入中计为 1 小时缓存的比例
+    #[serde(default = "default_fake_cache_one_hour_write_ratio")]
+    pub one_hour_write_ratio: f64,
+}
+
+impl Default for CacheManagementConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cache_management_enabled(),
+            min_ratio: default_fake_cache_min_ratio(),
+            max_ratio: default_fake_cache_max_ratio(),
+            read_split_min_ratio: default_fake_cache_read_split_min_ratio(),
+            read_split_max_ratio: default_fake_cache_read_split_max_ratio(),
+            read_multiplier: default_usage_multiplier(),
+            write_multiplier: default_usage_multiplier(),
+            cache_read_multiplier: default_usage_multiplier(),
+            cache_write_multiplier: default_usage_multiplier(),
+            state_ttl_seconds: default_fake_cache_state_ttl_seconds(),
+            one_hour_state_ttl_seconds: default_fake_cache_one_hour_state_ttl_seconds(),
+            one_hour_write_ratio: default_fake_cache_one_hour_write_ratio(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugLoggingConfig {
     #[serde(default)]
@@ -552,6 +723,11 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub image_thinking_mode: Option<String>,
 
+    /// 缓存管理配置
+    /// 控制 prompt cache 读写拆分与倍率
+    #[serde(default)]
+    pub cache_management: CacheManagementConfig,
+
     /// 代理池配置
     #[serde(default)]
     pub proxy_pool: ProxyPoolConfig,
@@ -592,6 +768,7 @@ impl Default for ProxyConfig {
             global_system_prompt: GlobalSystemPromptConfig::default(),
             proxy_pool: ProxyPoolConfig::default(),
             image_thinking_mode: None,
+            cache_management: CacheManagementConfig::default(),
         }
     }
 }
@@ -708,14 +885,32 @@ mod tests {
     #[test]
     fn test_normalize_proxy_url() {
         // 测试已有协议
-        assert_eq!(normalize_proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890");
-        assert_eq!(normalize_proxy_url("https://proxy.com"), "https://proxy.com");
-        assert_eq!(normalize_proxy_url("socks5://127.0.0.1:1080"), "socks5://127.0.0.1:1080");
-        assert_eq!(normalize_proxy_url("socks5h://127.0.0.1:1080"), "socks5h://127.0.0.1:1080");
+        assert_eq!(
+            normalize_proxy_url("http://127.0.0.1:7890"),
+            "http://127.0.0.1:7890"
+        );
+        assert_eq!(
+            normalize_proxy_url("https://proxy.com"),
+            "https://proxy.com"
+        );
+        assert_eq!(
+            normalize_proxy_url("socks5://127.0.0.1:1080"),
+            "socks5://127.0.0.1:1080"
+        );
+        assert_eq!(
+            normalize_proxy_url("socks5h://127.0.0.1:1080"),
+            "socks5h://127.0.0.1:1080"
+        );
 
         // 测试缺少协议（默认补全 http://）
-        assert_eq!(normalize_proxy_url("127.0.0.1:7890"), "http://127.0.0.1:7890");
-        assert_eq!(normalize_proxy_url("localhost:1082"), "http://localhost:1082");
+        assert_eq!(
+            normalize_proxy_url("127.0.0.1:7890"),
+            "http://127.0.0.1:7890"
+        );
+        assert_eq!(
+            normalize_proxy_url("localhost:1082"),
+            "http://localhost:1082"
+        );
 
         // 测试边缘情况
         assert_eq!(normalize_proxy_url(""), "");

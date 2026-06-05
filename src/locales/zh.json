@@ -1,5 +1,6 @@
 {
     "common": {
+        "app_name": "lov-analytics",
         "loading": "加载中...",
         "load_more": "加载更多",
         "add": "添加",
@@ -105,6 +106,8 @@
         "export_data": "导出账号数据",
         "for_gemini": "用于 Gemini",
         "for_claude": "用于 Claude",
+        "account_health_map": "账号活力图",
+        "need_attention": "需要关注",
         "toast": {
             "switch_success": "切换成功!",
             "switch_error": "切换账号失败",
@@ -175,11 +178,26 @@
             "forbidden": "403 Forbidden",
             "disabled": "账号已禁用",
             "proxy_disabled": "反代已禁用",
+            "normal": "正常",
+            "normal_desc": "账号当前可参与调度",
             "validation_required": "账号需验证",
             "risk_controlled": "风控/限流",
             "oauth_reauth_required": "授权异常",
             "violation_blocked": "由于违规被禁用"
         },
+        "rate_limited": "临时限流",
+        "rate_limit_wait": "剩余 {{time}}",
+        "rate_limited_tooltip": "本地限流冷却中，重试前可先解除冷却。",
+        "claude_protected": "Claude 保护",
+        "claude_protected_tooltip": "Claude 当前被配额/调度状态保护，可能暂不参与请求。",
+        "clear_limit": "解除限流/冻结",
+        "clear_cooldown": "解除冷却",
+        "test_claude_46": "测试该账号",
+        "test_model": "测试该账号",
+        "test_modal_title": "选择测试模型",
+        "test_now": "开始测试",
+        "test_success": "{{model}} 测试成功: {{message}}",
+        "test_failed": "{{model}} 测试失败",
         "error_details": "错误详情",
         "error_status": "错误状态",
         "error_time": "检测时间",
@@ -321,6 +339,7 @@
         },
         "table": {
             "email": "邮箱",
+            "status": "状态",
             "quota": "模型配额",
             "last_used": "最后使用",
             "actions": "操作"
@@ -360,6 +379,7 @@
             "general": "通用",
             "account": "账号",
             "proxy": "代理设置",
+            "cache_management": "缓存管理",
             "advanced": "高级",
             "debug": "调试",
             "about": "关于"
@@ -468,6 +488,26 @@
                 "healthy": "正常",
                 "timeout": "已超时"
             }
+        },
+        "cache_management": {
+            "title": "缓存管理",
+            "desc": "控制普通读写、缓存读写的返回倍率，并在上游没有缓存计数时合成缓存拆分。",
+            "ratio_section": "缓存比例",
+            "multiplier_section": "倍率",
+            "state_section": "状态窗口",
+            "min_percent": "最小比例 (%)",
+            "max_percent": "最大比例 (%)",
+            "read_multiplier": "读倍率",
+            "write_multiplier": "写倍率",
+            "cache_read_multiplier": "缓存读倍率",
+            "cache_write_multiplier": "缓存写倍率",
+            "ttl_5m": "5m TTL (秒)",
+            "ttl_1h": "1h TTL (秒)",
+            "one_hour_write_percent": "1h 写入占比 (%)",
+            "preview_prefix": "示例 10,000 输入",
+            "preview_read": "读",
+            "preview_cache_read": "缓存读",
+            "preview_cache_write": "缓存写"
         },
         "advanced": {
             "title": "高级设置",

@@ -48,7 +48,6 @@ pub struct ThinkingConfig {
     pub effort: Option<String>, // "low", "high", or "max"
 }
 
-
 /// System Prompt
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -251,7 +250,27 @@ pub struct Usage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation: Option<CacheCreationUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_cache_creation_5_m_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_cache_creation_1_h_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_total_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_tool_use: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheCreationUsage {
+    pub ephemeral_5m_input_tokens: u32,
+    pub ephemeral_1h_input_tokens: u32,
 }
 
 // ========== Gemini 数据模型 ==========

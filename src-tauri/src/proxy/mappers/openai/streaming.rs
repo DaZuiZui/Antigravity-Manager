@@ -8,19 +8,19 @@ use std::pin::Pin;
 use tracing::debug;
 use uuid::Uuid;
 
-
-
 /// 保存 thoughtSignature 到会话缓存
 pub fn store_thought_signature(sig: &str, session_id: &str, message_count: usize) {
     if sig.is_empty() {
         return;
     }
 
-
-
     // 2. [CRITICAL] 存储到 Session 隔离缓存 (对齐 Claude 协议)
-    crate::proxy::SignatureCache::global().cache_session_signature(session_id, sig.to_string(), message_count);
-    
+    crate::proxy::SignatureCache::global().cache_session_signature(
+        session_id,
+        sig.to_string(),
+        message_count,
+    );
+
     tracing::debug!(
         "[ThoughtSig] 存储 Session 签名 (sid: {}, len: {}, msg_count: {})",
         session_id,
@@ -29,10 +29,11 @@ pub fn store_thought_signature(sig: &str, session_id: &str, message_count: usize
     );
 }
 
-
-
 /// Extract and convert Gemini usageMetadata to OpenAI usage format
-fn extract_usage_metadata(u: &Value) -> Option<super::models::OpenAIUsage> {
+fn extract_usage_metadata(
+    u: &Value,
+    cache_key: Option<&str>,
+) -> Option<super::models::OpenAIUsage> {
     use super::models::{OpenAIUsage, PromptTokensDetails};
 
     let prompt_tokens = u
@@ -52,15 +53,24 @@ fn extract_usage_metadata(u: &Value) -> Option<super::models::OpenAIUsage> {
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
 
-    Some(OpenAIUsage {
+    let mut usage = OpenAIUsage {
         prompt_tokens,
         completion_tokens,
         total_tokens,
         prompt_tokens_details: cached_tokens.map(|ct| PromptTokensDetails {
             cached_tokens: Some(ct),
+            cached_creation_tokens: None,
         }),
         completion_tokens_details: None,
-    })
+        original_prompt_tokens: None,
+        original_completion_tokens: None,
+        original_total_tokens: None,
+        claude_cache_creation_5_m_tokens: None,
+        claude_cache_creation_1_h_tokens: None,
+    };
+
+    crate::proxy::usage_cache::apply_fake_cache_to_openai_usage(&mut usage, cache_key);
+    Some(usage)
 }
 
 pub fn create_openai_sse_stream<S, E>(
@@ -68,7 +78,7 @@ pub fn create_openai_sse_stream<S, E>(
     model: String,
     session_id: String,
     message_count: usize,
-) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> 
+) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>>
 where
     S: Stream<Item = Result<Bytes, E>> + Send + ?Sized + 'static,
     E: std::fmt::Display + Send + 'static,
@@ -103,7 +113,7 @@ where
                                         if let Ok(mut json) = serde_json::from_str::<Value>(json_part) {
                                             let actual_data = if let Some(inner) = json.get_mut("response").map(|v| v.take()) { inner } else { json };
                                             if let Some(u) = actual_data.get("usageMetadata") {
-                                                final_usage = extract_usage_metadata(u);
+                                                final_usage = extract_usage_metadata(u, Some(&session_id));
                                             }
 
                                             if let Some(candidates) = actual_data.get("candidates").and_then(|c| c.as_array()) {
@@ -139,7 +149,7 @@ where
                                                                     emitted_tool_calls.insert(call_key);
                                                                     let name = func_call.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
                                                                     let mut args = func_call.get("args").unwrap_or(&json!({})).clone();
-                                                                    
+
                                                                     // [FIX #1575] 标准化 shell 工具参数名称
                                                                     // Gemini 可能使用 cmd/code/script 等替代参数名，统一为 command
                                                                     if name == "shell" || name == "bash" || name == "local_shell" {
@@ -155,13 +165,13 @@ where
                                                                             }
                                                                         }
                                                                     }
-                                                                    
+
                                                                     let args_str = serde_json::to_string(&args).unwrap_or_default();
                                                                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                                                                     use std::hash::{Hash, Hasher};
                                                                     serde_json::to_string(func_call).unwrap_or_default().hash(&mut hasher);
                                                                     let call_id = format!("call_{:x}", hasher.finish());
- 
+
                                                                     let tool_call_chunk = json!({
                                                                         "id": &stream_id,
                                                                         "object": "chat.completion.chunk",
@@ -305,7 +315,7 @@ where
                     let json_part = line.trim_start_matches("data: ").trim();
                     if json_part != "[DONE]" {
                         // Re-use logic for processing the last line
-                        // (Note: In a more complex refactor we'd extract this to a function, 
+                        // (Note: In a more complex refactor we'd extract this to a function,
                         // but for a targeted fix, processing the terminal data chunk is safer)
                         tracing::debug!("[OpenAI-SSE] Flushing remaining {} bytes in buffer", buffer.len());
                     }
@@ -325,7 +335,7 @@ pub fn create_legacy_sse_stream<S, E>(
     model: String,
     session_id: String,
     message_count: usize,
-) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> 
+) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>>
 where
     S: Stream<Item = Result<Bytes, E>> + Send + ?Sized + 'static,
     E: std::fmt::Display + Send + 'static,
@@ -333,10 +343,12 @@ where
     let mut buffer = BytesMut::new();
     let charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let mut rng = rand::thread_rng();
-    let random_str: String = (0..28).map(|_| {
-        let idx = rng.gen_range(0..charset.len());
-        charset.chars().nth(idx).unwrap()
-    }).collect();
+    let random_str: String = (0..28)
+        .map(|_| {
+            let idx = rng.gen_range(0..charset.len());
+            charset.chars().nth(idx).unwrap()
+        })
+        .collect();
     let stream_id = format!("cmpl-{}", random_str);
     let created_ts = Utc::now().timestamp();
 
@@ -362,7 +374,7 @@ where
                                         if json_part == "[DONE]" { continue; }
                                         if let Ok(mut json) = serde_json::from_str::<Value>(json_part) {
                                             let actual_data = if let Some(inner) = json.get_mut("response").map(|v| v.take()) { inner } else { json };
-                                            if let Some(u) = actual_data.get("usageMetadata") { final_usage = extract_usage_metadata(u); }
+                                            if let Some(u) = actual_data.get("usageMetadata") { final_usage = extract_usage_metadata(u, Some(&session_id)); }
 
                                             let mut content_out = String::new();
                                             if let Some(candidates) = actual_data.get("candidates").and_then(|c| c.as_array()) {
@@ -427,7 +439,7 @@ pub fn create_codex_sse_stream<S, E>(
     _model: String,
     session_id: String,
     message_count: usize,
-) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> 
+) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>>
 where
     S: Stream<Item = Result<Bytes, E>> + Send + ?Sized + 'static,
     E: std::fmt::Display + Send + 'static,
@@ -435,10 +447,12 @@ where
     let mut buffer = BytesMut::new();
     let charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let mut rng = rand::thread_rng();
-    let random_str: String = (0..24).map(|_| {
-        let idx = rng.gen_range(0..charset.len());
-        charset.chars().nth(idx).unwrap()
-    }).collect();
+    let random_str: String = (0..24)
+        .map(|_| {
+            let idx = rng.gen_range(0..charset.len());
+            charset.chars().nth(idx).unwrap()
+        })
+        .collect();
     let response_id = format!("resp-{}", random_str);
     let item_id = format!("item-{}", &random_str[..16]);
 
@@ -663,6 +677,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_openai_streaming_usage_only_at_end() {
+        crate::proxy::update_cache_management_config(crate::proxy::config::CacheManagementConfig {
+            enabled: false,
+            ..Default::default()
+        });
+
         // Chunk 1: Partial content, no usage
         let chunk1_json = json!({
             "candidates": [{
@@ -671,7 +690,7 @@ mod tests {
                 }
             }]
         });
-        
+
         // Chunk 2: Finish reason + Usage metadata
         let chunk2_json = json!({
             "candidates": [{
@@ -699,7 +718,7 @@ mod tests {
             gemini_stream,
             "gemini-1.5-flash".to_string(),
             "test-session".to_string(),
-            0
+            0,
         );
 
         let mut chunks = Vec::new();
@@ -722,7 +741,11 @@ mod tests {
             let json: Value = serde_json::from_str(json_str).unwrap();
 
             if i < chunks.len() - 1 {
-                assert!(json.get("usage").is_none(), "Usage should not be in intermediate chunks. Found in chunk {}", i);
+                assert!(
+                    json.get("usage").is_none(),
+                    "Usage should not be in intermediate chunks. Found in chunk {}",
+                    i
+                );
             } else {
                 if let Some(usage) = json.get("usage") {
                     found_usage = true;
@@ -730,12 +753,12 @@ mod tests {
                     assert_eq!(usage["completion_tokens"], 2);
                     assert_eq!(usage["total_tokens"], 7);
                 }
-                 if let Some(choices) = json.get("choices") {
+                if let Some(choices) = json.get("choices") {
                     if let Some(choice) = choices.get(0) {
                         if let Some(finish_reason) = choice.get("finish_reason") {
-                             if finish_reason.as_str() == Some("stop") {
-                                 found_finish = true;
-                             }
+                            if finish_reason.as_str() == Some("stop") {
+                                found_finish = true;
+                            }
                         }
                     }
                 }
