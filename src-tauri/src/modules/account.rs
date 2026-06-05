@@ -1479,6 +1479,94 @@ pub fn update_account_quota(account_id: &str, quota: QuotaData) -> Result<(), St
     Ok(())
 }
 
+/// Clear stale account error flags after a user-initiated successful proxy test.
+///
+/// This intentionally avoids clearing `disabled`, because that usually means a real OAuth
+/// credential problem such as invalid_grant. It only clears proxy-disable flags that were
+/// produced by automatic 403/validation handling.
+pub fn clear_account_error_state_after_success(
+    account_id: &str,
+    model_id: Option<&str>,
+) -> Result<bool, String> {
+    let mut account = load_account(account_id)?;
+    let mut changed = false;
+
+    if let Some(ref mut quota) = account.quota {
+        if quota.is_forbidden || quota.forbidden_reason.is_some() {
+            quota.is_forbidden = false;
+            quota.forbidden_reason = None;
+            changed = true;
+        }
+    }
+
+    if account.validation_blocked
+        || account.validation_blocked_until.is_some()
+        || account.validation_blocked_reason.is_some()
+        || account.validation_url.is_some()
+    {
+        account.validation_blocked = false;
+        account.validation_blocked_until = None;
+        account.validation_blocked_reason = None;
+        account.validation_url = None;
+        changed = true;
+    }
+
+    let proxy_disable_reason = account.proxy_disabled_reason.as_deref().unwrap_or("");
+    let proxy_disable_reason_lower = proxy_disable_reason.to_lowercase();
+    let auto_disabled_by_error = proxy_disable_reason_lower.contains("403")
+        || proxy_disable_reason_lower.contains("forbidden")
+        || proxy_disable_reason_lower.contains("validation")
+        || proxy_disable_reason_lower.contains("quota fetch denied")
+        || proxy_disable_reason_lower.contains("warmup")
+        || proxy_disable_reason_lower.contains("scheduler");
+
+    if account.proxy_disabled && auto_disabled_by_error {
+        account.proxy_disabled = false;
+        account.proxy_disabled_reason = None;
+        account.proxy_disabled_at = None;
+        changed = true;
+    }
+
+    if let Some(model_id) = model_id {
+        if let Some(std_id) = crate::proxy::common::model_mapping::normalize_to_standard_id(model_id)
+        {
+            if account.protected_models.remove(&std_id) {
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return Ok(false);
+    }
+
+    save_account(&account)?;
+
+    {
+        let _lock = ACCOUNT_INDEX_LOCK
+            .lock()
+            .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
+        if let Ok(mut index) = load_account_index() {
+            if let Some(summary) = index.accounts.iter_mut().find(|a| a.id == account_id) {
+                summary.proxy_disabled = account.proxy_disabled;
+                summary.protected_models = account.protected_models.clone();
+                let _ = save_account_index(&index);
+            }
+        }
+    }
+
+    crate::proxy::server::trigger_account_reload(account_id);
+    crate::modules::log_bridge::emit_accounts_refreshed();
+
+    crate::modules::logger::log_info(&format!(
+        "Cleared stale account error state after successful test: {} ({})",
+        account.email,
+        model_id.unwrap_or("unknown model")
+    ));
+
+    Ok(true)
+}
+
 /// Toggle proxy disabled status for an account
 pub fn toggle_proxy_status(
     account_id: &str,

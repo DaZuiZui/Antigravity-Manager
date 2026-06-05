@@ -528,6 +528,7 @@ pub async fn handle_messages(
     let mut last_email: Option<String> = None;
     let mut last_mapped_model: Option<String> = None;
     let mut last_status = StatusCode::SERVICE_UNAVAILABLE; // Default to 503 if no response reached
+    let mut pending_403_accounts: Vec<(String, String, String, bool)> = Vec::new();
     
     for attempt in 0..max_attempts {
         // 2. 模型路由解析
@@ -1289,30 +1290,26 @@ pub async fn handle_messages(
         // [REMOVED] 不再特殊处理 QUOTA_EXHAUSTED,允许账号轮换
         // 原逻辑会在第一个账号配额耗尽时直接返回,导致"平衡"模式无法切换账号
 
-        // [FIX] 403 时设置 is_forbidden 状态，避免账号被重复选中
+        // 403 may be transient within this request: a later retry/account can still succeed.
+        // Do not persist account state here, otherwise a successful manual test can leave a
+        // stale "verification required" flag until the user refreshes quota.
         if status_code == 403 {
-            // Check for VALIDATION_REQUIRED error - temporarily block account
-            if error_text.contains("VALIDATION_REQUIRED") ||
-               error_text.contains("verify your account") ||
-               error_text.contains("validation_url")
-            {
-                tracing::warn!(
-                    "[Claude] VALIDATION_REQUIRED detected on account {}, temporarily blocking",
-                    email
-                );
-                let block_minutes = 10i64;
-                let block_until = chrono::Utc::now().timestamp() + (block_minutes * 60);
-                if let Err(e) = token_manager.set_validation_block_public(&account_id, block_until, &error_text).await {
-                    tracing::error!("Failed to set validation block: {}", e);
-                }
-            }
+            let validation_required = error_text.contains("VALIDATION_REQUIRED")
+                || error_text.contains("verify your account")
+                || error_text.contains("validation_url");
 
-            // 设置 is_forbidden 状态
-            if let Err(e) = token_manager.set_forbidden(&account_id, &error_text).await {
-                tracing::error!("Failed to set forbidden status for {}: {}", email, e);
-            } else {
-                tracing::warn!("[Claude] Account {} marked as forbidden due to 403", email);
-            }
+            pending_403_accounts.push((
+                account_id.clone(),
+                email.clone(),
+                error_text.clone(),
+                validation_required,
+            ));
+
+            tracing::warn!(
+                "[Claude] Deferred 403 state update for {} until retry exhaustion (validation_required={})",
+                email,
+                validation_required
+            );
         }
 
         // 确定重试策略
@@ -1358,6 +1355,34 @@ pub async fn handle_messages(
     
     
     if let Some(email) = last_email {
+        if last_status.as_u16() == 403 {
+            for (account_id, account_email, error_text, validation_required) in &pending_403_accounts {
+                if *validation_required {
+                    tracing::warn!(
+                        "[Claude] VALIDATION_REQUIRED confirmed after retry exhaustion on account {}",
+                        account_email
+                    );
+                    let block_minutes = 10i64;
+                    let block_until = chrono::Utc::now().timestamp() + (block_minutes * 60);
+                    if let Err(e) = token_manager
+                        .set_validation_block_public(account_id, block_until, error_text)
+                        .await
+                    {
+                        tracing::error!("Failed to set validation block: {}", e);
+                    }
+                }
+
+                if let Err(e) = token_manager.set_forbidden(account_id, error_text).await {
+                    tracing::error!("Failed to set forbidden status for {}: {}", account_email, e);
+                } else {
+                    tracing::warn!(
+                        "[Claude] Account {} marked as forbidden after retry exhaustion",
+                        account_email
+                    );
+                }
+            }
+        }
+
         // [FIX] Include X-Mapped-Model in exhaustion error
         let mut headers = HeaderMap::new();
         headers.insert("X-Account-Email", header::HeaderValue::from_str(&email).unwrap());

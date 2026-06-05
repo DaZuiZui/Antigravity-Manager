@@ -889,6 +889,36 @@ pub async fn toggle_proxy_status(
     Ok(())
 }
 
+/// 清除账号上一次 403/验证/模型保护留下的陈旧状态。
+/// 仅在用户手动测试模型成功后调用，不会清除 invalid_grant 等真正禁用状态。
+#[tauri::command]
+pub async fn clear_account_error_state(
+    app: tauri::AppHandle,
+    proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+    account_id: String,
+    model_id: Option<String>,
+) -> Result<bool, String> {
+    let changed = modules::account::clear_account_error_state_after_success(
+        &account_id,
+        model_id.as_deref(),
+    )?;
+
+    if changed {
+        let instance_lock = proxy_state.instance.read().await;
+        if let Some(instance) = instance_lock.as_ref() {
+            instance
+                .token_manager
+                .reload_account(&account_id)
+                .await
+                .map_err(|e| format!("同步账号失败: {}", e))?;
+        }
+
+        crate::modules::tray::update_tray_menus(&app);
+    }
+
+    Ok(changed)
+}
+
 /// 预热所有可用账号
 #[tauri::command]
 pub async fn warm_up_all_accounts() -> Result<String, String> {

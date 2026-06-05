@@ -794,7 +794,7 @@ function AccountRowContent({
                         <RotateCcw className="w-3.5 h-3.5" />
                     </TooltipIconButton>
                     <TooltipIconButton
-                        label={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        label={t('accounts.test_model', '测试该账号')}
                         className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${isRefreshing ? 'bg-violet-50 dark:bg-violet-900/10 text-violet-600 dark:text-violet-400 cursor-not-allowed' : 'hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
                         disabled={isRefreshing}

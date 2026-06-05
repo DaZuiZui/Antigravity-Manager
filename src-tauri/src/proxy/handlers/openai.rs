@@ -155,6 +155,8 @@ pub async fn handle_chat_completions(
 
     let mut last_error = String::new();
     let mut last_email: Option<String> = None;
+    let mut last_status = StatusCode::TOO_MANY_REQUESTS;
+    let mut pending_403_accounts: Vec<(String, String, String, bool)> = Vec::new();
 
     // 2. 模型路由解析 (移到循环外以支持在所有路径返回 X-Mapped-Model)
     let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
@@ -543,6 +545,7 @@ pub async fn handle_chat_completions(
             .text()
             .await
             .unwrap_or_else(|_| format!("HTTP {}", status_code));
+        last_status = status;
         last_error = format!("HTTP {}: {}", status_code, error_text);
 
         // [New] 打印错误报文日志
@@ -572,6 +575,25 @@ pub async fn handle_chat_completions(
                 &payload,
             )
             .await;
+        }
+
+        if status_code == 403 {
+            let validation_required = error_text.contains("VALIDATION_REQUIRED")
+                || error_text.contains("verify your account")
+                || error_text.contains("validation_url");
+
+            pending_403_accounts.push((
+                account_id.clone(),
+                email.clone(),
+                error_text.clone(),
+                validation_required,
+            ));
+
+            tracing::warn!(
+                "[OpenAI] Deferred 403 state update for {} until retry exhaustion (validation_required={})",
+                email,
+                validation_required
+            );
         }
 
         // 确定重试策略
@@ -700,52 +722,6 @@ pub async fn handle_chat_completions(
             }
         }
 
-        // 只有 403 (权限/地区限制) 和 401 (认证失效) 触发账号轮换
-        if status_code == 403 || status_code == 401 {
-            // [NEW] 403 时设置 is_forbidden 状态，避免 Claude Code 会话退出
-            if status_code == 403 {
-                if let Some(acc_id) = token_manager.get_account_id_by_email(&email) {
-                    // Check for VALIDATION_REQUIRED error - temporarily block account
-                    if error_text.contains("VALIDATION_REQUIRED")
-                        || error_text.contains("verify your account")
-                        || error_text.contains("validation_url")
-                    {
-                        tracing::warn!(
-                            "[OpenAI] VALIDATION_REQUIRED detected on account {}, temporarily blocking",
-                            email
-                        );
-                        // Block for 10 minutes (default, configurable via config file)
-                        let block_minutes = 10i64;
-                        let block_until = chrono::Utc::now().timestamp() + (block_minutes * 60);
-
-                        if let Err(e) = token_manager
-                            .set_validation_block_public(&acc_id, block_until, &error_text)
-                            .await
-                        {
-                            tracing::error!("Failed to set validation block: {}", e);
-                        }
-                    }
-
-                    // 设置 is_forbidden 状态
-                    if let Err(e) = token_manager.set_forbidden(&acc_id, &error_text).await {
-                        tracing::error!("Failed to set forbidden status: {}", e);
-                    }
-                }
-            }
-
-            if apply_retry_strategy(
-                RetryStrategy::FixedDelay(Duration::from_millis(200)),
-                attempt,
-                max_attempts,
-                status_code,
-                &trace_id,
-            )
-            .await
-            {
-                continue;
-            }
-        }
-
         // 404 等由于模型配置或路径错误的 HTTP 异常，直接报错，不进行无效轮换
         error!(
             "OpenAI Upstream non-retryable error {} on account {}: {}",
@@ -771,6 +747,34 @@ pub async fn handle_chat_completions(
 
     // 所有尝试均失败
     if let Some(email) = last_email {
+        if last_status.as_u16() == 403 {
+            for (account_id, account_email, error_text, validation_required) in &pending_403_accounts {
+                if *validation_required {
+                    tracing::warn!(
+                        "[OpenAI] VALIDATION_REQUIRED confirmed after retry exhaustion on account {}",
+                        account_email
+                    );
+                    let block_minutes = 10i64;
+                    let block_until = chrono::Utc::now().timestamp() + (block_minutes * 60);
+                    if let Err(e) = token_manager
+                        .set_validation_block_public(account_id, block_until, error_text)
+                        .await
+                    {
+                        tracing::error!("Failed to set validation block: {}", e);
+                    }
+                }
+
+                if let Err(e) = token_manager.set_forbidden(account_id, error_text).await {
+                    tracing::error!("Failed to set forbidden status for {}: {}", account_email, e);
+                } else {
+                    tracing::warn!(
+                        "[OpenAI] Account {} marked as forbidden after retry exhaustion",
+                        account_email
+                    );
+                }
+            }
+        }
+
         Ok((
             StatusCode::TOO_MANY_REQUESTS,
             [("X-Account-Email", email), ("X-Mapped-Model", mapped_model)],

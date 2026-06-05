@@ -504,7 +504,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                         <RotateCcw className="w-3.5 h-3.5" />
                     </TooltipIconButton>
                     <TooltipIconButton
-                        label={t('accounts.test_claude_46', '用 4.6 测试该账号')}
+                        label={t('accounts.test_model', '测试该账号')}
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing ? 'text-violet-600 bg-violet-50 cursor-not-allowed' : 'text-gray-400 hover:text-violet-600 hover:bg-violet-50'}`}
                         onClick={(e) => { e.stopPropagation(); onTestClaude(); }}
                         disabled={isRefreshing}
