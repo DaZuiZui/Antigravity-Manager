@@ -145,13 +145,13 @@ pub struct CircuitBreakerConfig {
     pub enabled: bool,
 
     /// Unified backoff steps (seconds)
-    /// Default: [60, 300, 1800, 7200]
+    /// Default: [5, 15, 30, 60, 120]
     #[serde(default = "default_backoff_steps")]
     pub backoff_steps: Vec<u64>,
 }
 
 fn default_backoff_steps() -> Vec<u64> {
-    vec![60, 300, 1800, 7200]
+    vec![5, 15, 30, 60, 120]
 }
 
 impl CircuitBreakerConfig {

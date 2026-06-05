@@ -1160,13 +1160,6 @@ fn format_switch_refresh_error(message: &str) -> String {
     format!("Token refresh failed: {}", message)
 }
 
-fn format_rate_limit_block_reason(err: &crate::error::AppError) -> String {
-    format!(
-        "Account is temporarily rate-limited or risk-controlled (RESOURCE_EXHAUSTED). Please cool down and retry later. Raw error: {}",
-        err
-    )
-}
-
 fn mark_validation_blocked(account: &mut Account, reason: &str) {
     if account.validation_blocked
         && account.validation_blocked_reason.as_deref() == Some(reason)
@@ -1198,6 +1191,24 @@ fn clear_validation_blocked(account: &mut Account) {
             "Failed to clear validation_blocked state for {}: {}",
             account.email, e
         ));
+    }
+}
+
+fn clear_rate_limit_validation_block(account: &mut Account) {
+    let reason = account
+        .validation_blocked_reason
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
+
+    if account.validation_blocked
+        && (reason.contains("429")
+            || reason.contains("too many requests")
+            || reason.contains("resource_exhausted")
+            || reason.contains("resource has been exhausted")
+            || reason.contains("rate-limited"))
+    {
+        clear_validation_blocked(account);
     }
 }
 
@@ -1885,7 +1896,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                             mark_validation_blocked(account, &e.to_string());
                         }
                         if let Some(cached) = recover_cached_quota_on_rate_limit(account, &e) {
-                            mark_validation_blocked(account, &format_rate_limit_block_reason(&e));
+                            clear_rate_limit_validation_block(account);
                             modules::logger::log_warn(&format!(
                                 "Quota API rate-limited for {}, using cached model list as fallback",
                                 account.email
@@ -1910,7 +1921,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                 mark_validation_blocked(account, &e.to_string());
             }
             if let Some(cached) = recover_cached_quota_on_rate_limit(account, &e) {
-                mark_validation_blocked(account, &format_rate_limit_block_reason(&e));
+                clear_rate_limit_validation_block(account);
                 modules::logger::log_warn(&format!(
                     "Quota API rate-limited for {}, using cached model list as fallback",
                     account.email

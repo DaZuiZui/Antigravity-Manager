@@ -2068,7 +2068,10 @@ impl TokenManager {
     /// 在请求成功完成后调用，将该账号的失败计数归零，
     /// 下次失败时从最短的锁定时间开始（智能限流）。
     pub fn mark_account_success(&self, account_id: &str) {
-        self.rate_limit_tracker.mark_success(account_id);
+        let key = self
+            .email_to_account_id(account_id)
+            .unwrap_or_else(|| account_id.to_string());
+        self.rate_limit_tracker.mark_success(&key);
     }
 
     /// 检查是否有可用的 Google 账号
@@ -2331,52 +2334,22 @@ impl TokenManager {
             return;
         }
 
-        // 确定限流原因
-        let reason = if error_body.to_lowercase().contains("model_capacity") {
-            crate::proxy::rate_limit::RateLimitReason::ModelCapacityExhausted
-        } else if error_body.to_lowercase().contains("exhausted")
-            || error_body.to_lowercase().contains("quota")
-        {
-            crate::proxy::rate_limit::RateLimitReason::QuotaExhausted
-        } else {
-            crate::proxy::rate_limit::RateLimitReason::Unknown
-        };
-
-        // API 未返回 quotaResetDelay,需要实时刷新配额获取精确锁定时间
-        if let Some(m) = model_to_track {
-            tracing::info!(
-                "账号 {} 的模型 {} 的 429 响应未包含 quotaResetDelay,尝试实时刷新配额...",
-                account_id,
-                m
-            );
-        } else {
-            tracing::info!(
-                "账号 {} 的 429 响应未包含 quotaResetDelay,尝试实时刷新配额...",
+        // 未携带明确重试时间时只做短退避。偶发 429 很常见，不应触发配额刷新
+        // 后再按 reset_time 长时间锁定账号/模型。
+        if status == 429 {
+            tracing::warn!(
+                "账号 {} 的 429 响应未包含明确重试时间,使用短退避策略",
                 account_id
             );
         }
 
-        // [FIX] 传入 email 而不是 account_id，因为 fetch_and_lock_with_realtime_quota 期望 email
-        if self.fetch_and_lock_with_realtime_quota(email, reason, model_to_track.map(|s| s.to_string())).await {
-            tracing::info!("账号 {} 已使用实时配额精确锁定", email);
-            return;
-        }
-
-        // 实时刷新失败,尝试使用本地缓存的配额刷新时间
-        if self.set_precise_lockout(&account_id, reason, model_to_track.map(|s| s.to_string())) {
-            tracing::info!("账号 {} 已使用本地缓存配额锁定", account_id);
-            return;
-        }
-
-        // 都失败了,回退到指数退避策略
-        tracing::warn!("账号 {} 无法获取配额刷新时间,使用指数退避策略", account_id);
         self.rate_limit_tracker.parse_from_error(
             &account_id,
             status,
             retry_after_header,
             error_body,
             model_to_track.map(|s| s.to_string()),
-            &config.backoff_steps, // [NEW] 传入配置
+            &config.backoff_steps,
         );
     }
 

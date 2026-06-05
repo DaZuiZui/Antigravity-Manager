@@ -40,6 +40,7 @@ pub struct RateLimitInfo {
 
 /// 失败计数过期时间：1小时（超过此时间未失败则重置计数）
 const FAILURE_COUNT_EXPIRY_SECONDS: u64 = 3600;
+const MAX_SOFT_LOCKOUT_SECONDS: u64 = 120;
 
 /// 限流跟踪器
 pub struct RateLimitTracker {
@@ -94,16 +95,11 @@ impl RateLimitTracker {
     /// 标记账号请求成功，重置连续失败计数
     /// 
     /// 当账号成功完成请求后调用此方法，将其失败计数归零，
-    /// 这样下次失败时会从最短的锁定时间（60秒）开始。
+    /// 这样下次失败时会从最短的锁定时间开始。
     pub fn mark_success(&self, account_id: &str) {
-        if self.failure_counts.remove(account_id).is_some() {
-            tracing::debug!("账号 {} 请求成功，已重置失败计数", account_id);
+        if self.clear(account_id) {
+            tracing::debug!("账号 {} 请求成功，已清除限流记录", account_id);
         }
-        // 清除账号级限流
-        self.limits.remove(account_id);
-        // 注意：我们暂时无法清除该账号下的所有模型级锁，因为我们不知道哪些模型被锁了
-        // 除非遍历 limits。考虑到模型级锁通常是 QuotaExhausted，让其自然过期也是可以接受的。
-        // 或者我们可以引入索引，但为了简单，暂时只清除 Account 级锁。
     }
     
     /// 精确锁定账号到指定时间点
@@ -221,8 +217,8 @@ impl RateLimitTracker {
         // 4. 处理默认值与软避让逻辑（根据限流类型设置不同默认值）
         let retry_sec = match retry_after_sec {
             Some(s) => {
-                // 设置安全缓冲区：最小 2 秒，防止极高频无效重试
-                if s < 2 { 2 } else { s }
+                // 设置安全缓冲区并封顶，防止偶发 429 给出超长 retry-after 后长期冻结。
+                s.clamp(2, MAX_SOFT_LOCKOUT_SECONDS)
             },
             None => {
                 // 获取连续失败次数，用于指数退避（带自动过期逻辑）
@@ -230,11 +226,8 @@ impl RateLimitTracker {
                 let failure_count = if reason != RateLimitReason::ServerError {
                     // 只有非 ServerError 才累加失败计数（用于指数退避）
                     let now = SystemTime::now();
-                    // 这里我们使用 account_id 作为 key，不区分模型，
-                    // 因为这里是为了计算连续"账号级"问题的退避。
-                    // 如果需要针对模型的连续失败计数，可能需要改变 failure_counts 的 key。
-                    // 暂时保持 account_id，这样如果一个模型一直挂，也会增加计数，符合逻辑。
-                    let mut entry = self.failure_counts.entry(account_id.to_string()).or_insert((0, now));
+                    let failure_key = self.get_limit_key(account_id, model.as_deref());
+                    let mut entry = self.failure_counts.entry(failure_key).or_insert((0, now));
 
                     let elapsed = now.duration_since(entry.1).unwrap_or(Duration::from_secs(0)).as_secs();
                     if elapsed > FAILURE_COUNT_EXPIRY_SECONDS {
@@ -256,8 +249,9 @@ impl RateLimitTracker {
                         let lockout = if index < backoff_steps.len() {
                             backoff_steps[index]
                         } else {
-                            *backoff_steps.last().unwrap_or(&7200)
-                        };
+                            *backoff_steps.last().unwrap_or(&MAX_SOFT_LOCKOUT_SECONDS)
+                        }
+                        .min(MAX_SOFT_LOCKOUT_SECONDS);
 
                         tracing::warn!(
                             "检测到配额耗尽 (QUOTA_EXHAUSTED)，第{}次连续失败，根据配置锁定 {} 秒", 
@@ -287,8 +281,8 @@ impl RateLimitTracker {
                     },
                     RateLimitReason::Unknown => {
                         // 未知原因
-                        tracing::debug!("无法解析 429 限流原因, 使用默认值 60秒");
-                        60
+                        tracing::debug!("无法解析 429 限流原因, 使用默认值 10秒");
+                        10
                     }
                 }
             }
@@ -547,7 +541,32 @@ impl RateLimitTracker {
     
     /// 清除指定账号的限流记录
     pub fn clear(&self, account_id: &str) -> bool {
-        self.limits.remove(account_id).is_some()
+        let mut removed = self.limits.remove(account_id).is_some();
+        removed |= self.failure_counts.remove(account_id).is_some();
+
+        let prefix = format!("{}:", account_id);
+
+        let limit_keys: Vec<String> = self
+            .limits
+            .iter()
+            .filter(|entry| entry.key().starts_with(&prefix))
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in limit_keys {
+            removed |= self.limits.remove(&key).is_some();
+        }
+
+        let failure_keys: Vec<String> = self
+            .failure_counts
+            .iter()
+            .filter(|entry| entry.key().starts_with(&prefix))
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in failure_keys {
+            removed |= self.failure_counts.remove(&key).is_some();
+        }
+
+        removed
     }
     
     /// 清除所有限流记录 (乐观重置策略)
@@ -636,7 +655,7 @@ mod tests {
     #[test]
     fn test_server_error_does_not_accumulate_failure_count() {
         let tracker = RateLimitTracker::new();
-        let backoff_steps = vec![60, 300, 1800, 7200];
+        let backoff_steps = vec![5, 15, 30, 60, 120];
 
         // 模拟连续 5 次 5xx 错误
         for i in 1..=5 {
@@ -653,30 +672,115 @@ mod tests {
         assert!(info.is_some());
         let info = info.unwrap();
 
-        // 关键断言：429 应该从第 1 次开始（锁 60 秒），而不是继承 5xx 的计数
-        assert_eq!(info.retry_after_sec, 60, "429 应该从第 1 次退避开始(60秒),而不是被 5xx 污染");
+        // 关键断言：429 应该从第 1 次开始（锁 5 秒），而不是继承 5xx 的计数
+        assert_eq!(info.retry_after_sec, 5, "429 应该从第 1 次退避开始(5秒),而不是被 5xx 污染");
     }
 
     #[test]
     fn test_quota_exhausted_does_accumulate_failure_count() {
         let tracker = RateLimitTracker::new();
-        let backoff_steps = vec![60, 300, 1800, 7200];
+        let backoff_steps = vec![5, 15, 30, 60, 120];
         let quota_body = r#"{"error":{"details":[{"reason":"QUOTA_EXHAUSTED"}]}}"#;
 
-        // 第 1 次 429 → 60 秒
+        // 第 1 次 429 → 5 秒
+        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
+        assert_eq!(info.unwrap().retry_after_sec, 5);
+
+        // 第 2 次 429 → 15 秒
+        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
+        assert_eq!(info.unwrap().retry_after_sec, 15);
+
+        // 第 3 次 429 → 30 秒
+        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
+        assert_eq!(info.unwrap().retry_after_sec, 30);
+
+        // 第 4 次 429 → 60 秒
         let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
         assert_eq!(info.unwrap().retry_after_sec, 60);
+    }
 
-        // 第 2 次 429 → 300 秒
-        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
-        assert_eq!(info.unwrap().retry_after_sec, 300);
+    #[test]
+    fn test_quota_exhausted_failure_count_is_model_scoped() {
+        let tracker = RateLimitTracker::new();
+        let backoff_steps = vec![5, 15, 30, 60, 120];
+        let quota_body = r#"{"error":{"details":[{"reason":"QUOTA_EXHAUSTED"}]}}"#;
 
-        // 第 3 次 429 → 1800 秒
-        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
-        assert_eq!(info.unwrap().retry_after_sec, 1800);
+        let claude = tracker.parse_from_error(
+            "acc3",
+            429,
+            None,
+            quota_body,
+            Some("claude".to_string()),
+            &backoff_steps,
+        );
+        assert_eq!(claude.unwrap().retry_after_sec, 5);
 
-        // 第 4 次 429 → 7200 秒
-        let info = tracker.parse_from_error("acc2", 429, None, quota_body, None, &backoff_steps);
-        assert_eq!(info.unwrap().retry_after_sec, 7200);
+        let gemini = tracker.parse_from_error(
+            "acc3",
+            429,
+            None,
+            quota_body,
+            Some("gemini-3-flash".to_string()),
+            &backoff_steps,
+        );
+        assert_eq!(gemini.unwrap().retry_after_sec, 5);
+
+        let claude_again = tracker.parse_from_error(
+            "acc3",
+            429,
+            None,
+            quota_body,
+            Some("claude".to_string()),
+            &backoff_steps,
+        );
+        assert_eq!(claude_again.unwrap().retry_after_sec, 15);
+    }
+
+    #[test]
+    fn test_clear_removes_model_level_limits_and_failure_counts() {
+        let tracker = RateLimitTracker::new();
+        let backoff_steps = vec![5, 15, 30, 60, 120];
+        let quota_body = r#"{"error":{"details":[{"reason":"QUOTA_EXHAUSTED"}]}}"#;
+
+        tracker.parse_from_error(
+            "acc4",
+            429,
+            None,
+            quota_body,
+            Some("claude".to_string()),
+            &backoff_steps,
+        );
+        assert!(tracker.get_remaining_wait("acc4", Some("claude")) > 0);
+
+        assert!(tracker.clear("acc4"));
+        assert_eq!(tracker.get_remaining_wait("acc4", Some("claude")), 0);
+
+        let info = tracker.parse_from_error(
+            "acc4",
+            429,
+            None,
+            quota_body,
+            Some("claude".to_string()),
+            &backoff_steps,
+        );
+        assert_eq!(info.unwrap().retry_after_sec, 5);
+    }
+
+    #[test]
+    fn test_explicit_retry_after_is_soft_capped() {
+        let tracker = RateLimitTracker::new();
+        let info = tracker
+            .parse_from_error("acc5", 429, Some("3600"), "", None, &[5, 15, 30, 60, 120])
+            .unwrap();
+        assert_eq!(info.retry_after_sec, MAX_SOFT_LOCKOUT_SECONDS);
+    }
+
+    #[test]
+    fn test_unknown_429_uses_short_lockout() {
+        let tracker = RateLimitTracker::new();
+        let info = tracker
+            .parse_from_error("acc6", 429, None, "temporary upstream limit", None, &[5, 15, 30, 60, 120])
+            .unwrap();
+        assert_eq!(info.retry_after_sec, 10);
     }
 }
