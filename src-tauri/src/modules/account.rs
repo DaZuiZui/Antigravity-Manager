@@ -1529,7 +1529,13 @@ pub fn clear_account_error_state_after_success(
         || proxy_disable_reason_lower.contains("validation")
         || proxy_disable_reason_lower.contains("quota fetch denied")
         || proxy_disable_reason_lower.contains("warmup")
-        || proxy_disable_reason_lower.contains("scheduler");
+        || proxy_disable_reason_lower.contains("scheduler")
+        || proxy_disable_reason_lower.contains("rate limit")
+        || proxy_disable_reason_lower.contains("risk control")
+        || proxy_disable_reason_lower.contains("frozen")
+        || proxy_disable_reason_lower.contains("验证")
+        || proxy_disable_reason_lower.contains("风控")
+        || proxy_disable_reason_lower.contains("冻结");
 
     if account.proxy_disabled && auto_disabled_by_error {
         account.proxy_disabled = false;
@@ -1545,6 +1551,9 @@ pub fn clear_account_error_state_after_success(
                 changed = true;
             }
         }
+    } else if !account.protected_models.is_empty() {
+        account.protected_models.clear();
+        changed = true;
     }
 
     if !changed {

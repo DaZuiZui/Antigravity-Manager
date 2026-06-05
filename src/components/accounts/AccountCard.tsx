@@ -7,6 +7,7 @@ import { useConfigStore } from '../../stores/useConfigStore';
 import { QuotaItem } from './QuotaItem';
 import { MODEL_CONFIG, sortModels } from '../../config/modelConfig';
 import { getValidationBlockedStatusLabel } from './accountValidationStatus';
+import { hasClearableAccountState } from './accountClearState';
 
 interface AccountCardProps {
     account: Account;
@@ -133,7 +134,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
     const rateLimitWait = formatWait(account.rate_limit_reset_seconds);
     const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
     const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t);
-    const showClearCooldown = account.rate_limited || Boolean(account.rate_limit_reset_seconds) || hasClaudeProtection;
+    const showClearCooldown = hasClearableAccountState(account);
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -338,7 +339,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                         onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
                     >
                         <RotateCcw className="w-3 h-3" />
-                        {t('accounts.clear_cooldown', '解除冷却')}
+                        {t('accounts.clear_limit', '解除限流/冻结')}
                     </button>
                 )}
             </div>
@@ -496,13 +497,15 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                     >
                         <Network className="w-3.5 h-3.5" />
                     </TooltipIconButton>
-                    <TooltipIconButton
-                        label={t('accounts.clear_limit', '解除限流/冻结')}
-                        className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                        onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
-                    >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                    </TooltipIconButton>
+                    {showClearCooldown && (
+                        <TooltipIconButton
+                            label={t('accounts.clear_limit', '解除限流/冻结')}
+                            className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                            onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
+                        >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                        </TooltipIconButton>
+                    )}
                     <TooltipIconButton
                         label={t('accounts.test_model', '测试该账号')}
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing ? 'text-violet-600 bg-violet-50 cursor-not-allowed' : 'text-gray-400 hover:text-violet-600 hover:bg-violet-50'}`}
