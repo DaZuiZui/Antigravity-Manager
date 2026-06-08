@@ -161,7 +161,14 @@ pub async fn handle_generate(
         // [FIX #765] Pass session_id to wrap_request for signature injection
         // [NEW] 获取完整 Token 对象以注入动态规格 (dynamic > static default > 65535)
         let token_obj = token_manager.get_token_by_id(&account_id);
-        let wrapped_body = wrap_request(&body, &project_id, &mapped_model, Some(account_id.as_str()), Some(&session_id), token_obj.as_ref());
+        let wrapped_body = wrap_request(
+            &body,
+            &project_id,
+            &mapped_model,
+            Some(account_id.as_str()),
+            Some(&session_id),
+            token_obj.as_ref(),
+        );
 
         if debug_logger::is_enabled(&debug_cfg) {
             let payload = json!({
@@ -215,6 +222,10 @@ pub async fn handle_generate(
             Ok(r) => r,
             Err(e) => {
                 last_error = e.clone();
+                token_manager.mark_resource_failure(
+                    &account_id,
+                    &format!("Gemini upstream call failed: {}", e),
+                );
                 debug!(
                     "Gemini Request failed on attempt {}/{}: {}",
                     attempt + 1,
@@ -263,7 +274,8 @@ pub async fn handle_generate(
         let status = response.status();
 
         // [NEW] 提取官方 TraceID
-        let cloud_code_trace_id = response.headers()
+        let cloud_code_trace_id = response
+            .headers()
             .get("x-cloudaicompanion-trace-id")
             .and_then(|h| h.to_str().ok())
             .map(|s| s.to_string());
@@ -334,8 +346,14 @@ pub async fn handle_generate(
                 }
 
                 if retry_gemini {
+                    token_manager.mark_resource_failure(
+                        &account_id,
+                        &format!("Gemini stream probe failed: {}", last_error),
+                    );
                     continue;
                 }
+
+                token_manager.mark_account_success(&email);
 
                 let s_id_for_stream = s_id.clone();
                 let model_name_for_stream = mapped_model.clone();
@@ -366,7 +384,7 @@ pub async fn handle_generate(
                                 Ok(next_item) => next_item,
                                 Err(_) => {
                                     error!("[Gemini-SSE] Idle timeout after 300s, terminating stream");
-                                    None 
+                                    None
                                 }
                             }
                         };
@@ -487,6 +505,7 @@ pub async fn handle_generate(
                                 session_id
                             );
                             let unwrapped = unwrap_response(&gemini_resp);
+                            token_manager.mark_account_success(&email);
                             return Ok((
                                 StatusCode::OK,
                                 [
@@ -553,6 +572,7 @@ pub async fn handle_generate(
             }
 
             let unwrapped = unwrap_response(&gemini_resp);
+            token_manager.mark_account_success(&email);
             return Ok((
                 StatusCode::OK,
                 [
@@ -594,12 +614,32 @@ pub async fn handle_generate(
             .await;
         }
 
+        if matches!(status_code, 401 | 403 | 404 | 429 | 500 | 503 | 529) {
+            token_manager
+                .mark_rate_limited_async(
+                    &email,
+                    status_code,
+                    None,
+                    &error_text,
+                    Some(&mapped_model),
+                )
+                .await;
+        }
+
         // 确定重试策略
         let strategy = determine_retry_strategy(status_code, &error_text, false);
         let trace_id = format!("gemini_{}", session_id);
 
         // 执行退避
-        if apply_retry_strategy(strategy.clone(), attempt, max_attempts, status_code, &trace_id).await {
+        if apply_retry_strategy(
+            strategy.clone(),
+            attempt,
+            max_attempts,
+            status_code,
+            &trace_id,
+        )
+        .await
+        {
             // [NEW] Apply Client Adapter "let_it_crash" strategy
             if let Some(adapter) = &client_adapter {
                 if adapter.let_it_crash() && attempt > 0 {
@@ -612,17 +652,17 @@ pub async fn handle_generate(
             }
 
             // 判断是否需要轮换账号
-        // 判断是否需要轮换账号
-        let mut force_rotate = false;
-        if !should_rotate_account(status_code, Some(&strategy)) {
-            debug!(
+            // 判断是否需要轮换账号
+            let mut force_rotate = false;
+            if !should_rotate_account(status_code, Some(&strategy)) {
+                debug!(
                 "[{}] Keeping same account for status {} (Gemini server-side issue or Grace Retry)",
                 trace_id, status_code
             );
-            force_rotate = false;
-        } else {
-            force_rotate = true;
-        }
+                force_rotate = false;
+            } else {
+                force_rotate = true;
+            }
         }
 
         // [NEW] 处理 400 错误 (Thinking 签名失效)

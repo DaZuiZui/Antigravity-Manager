@@ -291,6 +291,10 @@ pub async fn handle_chat_completions(
             Ok(r) => r,
             Err(e) => {
                 last_error = e.clone();
+                token_manager.mark_resource_failure(
+                    &account_id,
+                    &format!("OpenAI upstream call failed: {}", e),
+                );
                 debug!(
                     "OpenAI Request failed on attempt {}/{}: {}",
                     attempt + 1,
@@ -600,7 +604,7 @@ pub async fn handle_chat_completions(
         let strategy = determine_retry_strategy(status_code, &error_text, false);
 
         // 3. 标记限流状态(用于 UI 显示)
-        if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
+        if matches!(status_code, 401 | 403 | 404 | 429 | 500 | 503 | 529) {
             // [FIX] Use async version with model parameter for fine-grained rate limiting
             token_manager
                 .mark_rate_limited_async(
@@ -1277,6 +1281,10 @@ pub async fn handle_completions(
             Ok(r) => r,
             Err(e) => {
                 last_error = e.clone();
+                token_manager.mark_resource_failure(
+                    &account_id,
+                    &format!("Codex upstream call failed: {}", e),
+                );
                 debug!(
                     "Codex Request failed on attempt {}/{}: {}",
                     attempt + 1,
@@ -1570,7 +1578,7 @@ pub async fn handle_completions(
         );
 
         // 3. 标记限流状态(用于 UI 显示)
-        if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
+        if matches!(status_code, 401 | 403 | 404 | 429 | 500 | 503 | 529) {
             token_manager
                 .mark_rate_limited_async(
                     &email,
@@ -1951,7 +1959,7 @@ pub async fn handle_images_generations_internal(
                             last_error = format!("Upstream error {}: {}", status, err_text);
 
                             // 429/500/503 等错误进行标记和重试
-                            if status_code == 429 || status_code == 503 || status_code == 500 {
+                            if matches!(status_code, 401 | 403 | 404 | 429 | 500 | 503 | 529) {
                                 tracing::warn!(
                                     "[Images] Account {} rate limited/error ({}), rotating...",
                                     email,
@@ -1973,12 +1981,19 @@ pub async fn handle_images_generations_internal(
                             return Err(last_error);
                         }
                         match response.json::<Value>().await {
-                            Ok(json) => return Ok((json, email)),
+                            Ok(json) => {
+                                token_manager.mark_account_success(&email);
+                                return Ok((json, email));
+                            }
                             Err(e) => return Err(format!("Parse error: {}", e)),
                         }
                     }
                     Err(e) => {
                         last_error = format!("Network error: {}", e);
+                        token_manager.mark_resource_failure(
+                            &account_id,
+                            &format!("Image upstream call failed: {}", e),
+                        );
                         continue;
                     }
                 }
@@ -2352,7 +2367,7 @@ pub async fn handle_images_edits(
                             last_error = format!("Upstream error {}: {}", status, err_text);
 
                             // 429/500/503 等错误进行标记和重试
-                            if status_code == 429 || status_code == 503 || status_code == 500 {
+                            if matches!(status_code, 401 | 403 | 404 | 429 | 500 | 503 | 529) {
                                 tracing::warn!(
                                     "[Images] Account {} rate limited/error ({}), rotating...",
                                     email,
@@ -2372,12 +2387,19 @@ pub async fn handle_images_edits(
                             return Err(last_error);
                         }
                         match response.json::<Value>().await {
-                            Ok(json) => return Ok((json, response_format.clone(), email)),
+                            Ok(json) => {
+                                token_manager.mark_account_success(&email);
+                                return Ok((json, response_format.clone(), email));
+                            }
                             Err(e) => return Err(format!("Parse error: {}", e)),
                         }
                     }
                     Err(e) => {
                         last_error = format!("Network error: {}", e);
+                        token_manager.mark_resource_failure(
+                            &account_id,
+                            &format!("Image edit upstream call failed: {}", e),
+                        );
                         continue;
                     }
                 }

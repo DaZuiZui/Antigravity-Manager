@@ -384,7 +384,7 @@ export default function ApiProxy() {
             // Determine appropriate message
             let message: string;
             if (accountId === null) {
-                message = t('proxy.config.scheduling.round_robin_set', { defaultValue: 'Round-robin mode enabled' });
+                message = t('proxy.config.scheduling.load_balanced_set', { defaultValue: 'Load-balanced mode enabled' });
             } else if (wasEnabled) {
                 // Changed account while already in fixed mode
                 const account = availableAccounts.find(a => a.id === accountId);
@@ -1797,7 +1797,7 @@ print(response.choices[0].message.content)`;
                                                                 {t(`proxy.config.scheduling.modes_desc.${mode}`, {
                                                                     defaultValue: mode === 'CacheFirst' ? 'Binds session to account, waits precisely if limited (Maximizes Prompt Cache hits).' :
                                                                         mode === 'Balance' ? 'Binds session, auto-switches to available account if limited (Balanced cache & availability).' :
-                                                                            'No session binding, pure round-robin rotation (Best for high concurrency).'
+                                                                            'No session binding, weighted load-balanced rotation (Best for high concurrency).'
                                                                 })}
                                                             </div>
                                                         </div>

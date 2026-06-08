@@ -826,7 +826,7 @@
                 "title_tooltip": "控制会话如何绑定到账号，以及触发限流时的行为。",
                 "subtitle": "针对全协议客户端优化 Prompt Caching 和限流处理 (OpenAI/Gemini/Claude)。",
                 "mode": "调度模式",
-                "mode_tooltip": "缓存优先：绑定账号，限流时强制等待（最大化缓存）；平衡：绑定账号，限流时自动热切；性能优先：不绑定，全自动轮换。",
+                "mode_tooltip": "缓存优先：绑定账号，限流时强制等待（最大化缓存）；平衡：绑定账号，限流时自动热切；性能优先：不绑定，按账号权重做负载均衡。",
                 "modes": {
                     "CacheFirst": "缓存优先 (Cache First)",
                     "Balance": "平衡轮换 (Balance)",
@@ -835,14 +835,15 @@
                 "modes_desc": {
                     "CacheFirst": "绑定会话与账号，限流时精准等待（最大化 Prompt Cache 命中率）。",
                     "Balance": "绑定会话，限流时自动热切换至可用账号（兼顾缓存与可用性）。",
-                    "PerformanceFirst": "无会话绑定，纯随机轮换（适合高并发，不考虑缓存）。"
+                    "PerformanceFirst": "无会话绑定，按订阅等级、模型配额、健康分和已使用次数做加权负载均衡。"
                 },
                 "max_wait": "最大等待时长 (秒)",
                 "max_wait_tooltip": "仅在“缓存优先”模式下生效：如果账号限流重置时间小于此值，则原地等待而非切换账号。",
                 "clear_bindings": "清除会话绑定",
                 "clear_bindings_tooltip": "立即断开所有会话与账号的绑定关系，强制下一次请求重新分配账号。",
                 "clear_rate_limits": "清除限流记录",
-                "clear_rate_limits_tooltip": "立即清除所有账号的本地限流记录，强制下一次请求尝试直接调用上游。"
+                "clear_rate_limits_tooltip": "立即清除所有账号的本地限流记录，强制下一次请求尝试直接调用上游。",
+                "load_balanced_set": "负载均衡模式已启用"
             },
             "circuit_breaker": {
                 "title": "自适应熔断器",

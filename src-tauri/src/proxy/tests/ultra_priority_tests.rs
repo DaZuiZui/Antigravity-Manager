@@ -55,6 +55,14 @@ fn create_test_token(
         validation_url: None,
         model_quotas,
         model_limits: std::collections::HashMap::new(),
+        frozen: false,
+        initialized: true,
+        failures: 0,
+        last_failure_time: None,
+        last_success_time: None,
+        upper_limit: false,
+        upper_limit_since: None,
+        token_refresh_history: Vec::new(),
     }
 }
 

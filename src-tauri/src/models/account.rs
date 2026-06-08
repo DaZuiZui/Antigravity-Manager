@@ -1,6 +1,6 @@
+use super::{quota::QuotaData, token::TokenData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use super::{token::TokenData, quota::QuotaData};
 
 /// 账号数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +28,9 @@ pub struct Account {
     /// User manually disabled proxy feature (does not affect app usage).
     #[serde(default)]
     pub proxy_disabled: bool,
+    /// 管理员手动冻结资源池调度。冻结账号永不参与代理调度。
+    #[serde(default)]
+    pub frozen: bool,
     /// Optional human-readable reason for proxy disabling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_disabled_reason: Option<String>,
@@ -49,6 +52,27 @@ pub struct Account {
     /// [NEW] 验证链接 URL (#1522)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_url: Option<String>,
+    /// 资源池状态机：是否已完成懒初始化。
+    #[serde(default)]
+    pub initialized: bool,
+    /// 资源池状态机：连续可恢复失败次数。
+    #[serde(default)]
+    pub failures: u32,
+    /// 资源池状态机：最近一次可恢复失败时间戳。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure_time: Option<i64>,
+    /// 资源池状态机：最近一次业务成功时间戳。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_time: Option<i64>,
+    /// 资源池状态机：上游明确总额度/月额度耗尽，退出业务调度。
+    #[serde(default)]
+    pub upper_limit: bool,
+    /// 资源池状态机：进入 upper_limit 的时间戳。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper_limit_since: Option<i64>,
+    /// 资源池状态机：upper_limit 保号刷新记录。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_refresh_history: Vec<i64>,
     pub created_at: i64,
     pub last_used: i64,
     /// 绑定的代理 ID (None = 使用全局代理池)
@@ -77,6 +101,7 @@ impl Account {
             disabled_reason: None,
             disabled_at: None,
             proxy_disabled: false,
+            frozen: false,
             proxy_disabled_reason: None,
             proxy_disabled_at: None,
             protected_models: HashSet::new(),
@@ -84,6 +109,13 @@ impl Account {
             validation_blocked_until: None,
             validation_blocked_reason: None,
             validation_url: None,
+            initialized: false,
+            failures: 0,
+            last_failure_time: None,
+            last_success_time: None,
+            upper_limit: false,
+            upper_limit_since: None,
+            token_refresh_history: Vec::new(),
             created_at: now,
             last_used: now,
             proxy_id: None,
