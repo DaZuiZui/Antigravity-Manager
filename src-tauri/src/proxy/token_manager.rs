@@ -278,6 +278,17 @@ impl TokenManager {
                 }
             };
 
+            let now = chrono::Utc::now().timestamp();
+            let validation_blocked = account
+                .get("validation_blocked")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                && account
+                    .get("validation_blocked_until")
+                    .and_then(|v| v.as_i64())
+                    .map(|until| until > now)
+                    .unwrap_or(false);
+
             let disabled = account
                 .get("disabled")
                 .and_then(|v| v.as_bool())
@@ -290,7 +301,8 @@ impl TokenManager {
                     .get("quota")
                     .and_then(|q| q.get("is_forbidden"))
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+                || validation_blocked;
 
             return if disabled {
                 OnDiskAccountState::Disabled
@@ -308,6 +320,29 @@ impl TokenManager {
 
         let mut account: serde_json::Value =
             serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {}", e))?;
+
+        if let Some(account_id) = account
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|id| id.to_string())
+        {
+            match crate::modules::account::reconcile_temporary_account_state(&account_id) {
+                Ok(true) => {
+                    let refreshed_content = std::fs::read_to_string(path)
+                        .map_err(|e| format!("读取文件失败: {}", e))?;
+                    account = serde_json::from_str(&refreshed_content)
+                        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::debug!(
+                        "Failed to reconcile temporary account state for {}: {}",
+                        account_id,
+                        e
+                    );
+                }
+            }
+        }
 
         // [修复 #1344] 先检查账号是否被手动禁用(非配额保护原因)
         let is_proxy_disabled = account
@@ -349,6 +384,10 @@ impl TokenManager {
 
             if now < block_until {
                 // Still blocked
+                if let Some(account_id) = account.get("id").and_then(|v| v.as_str()) {
+                    Self::schedule_validation_recovery(account_id.to_string(), block_until);
+                }
+
                 tracing::debug!(
                     "Skipping validation-blocked account: {:?} (email={}, blocked until {})",
                     path,
@@ -366,6 +405,7 @@ impl TokenManager {
                 account["validation_blocked"] = serde_json::json!(false);
                 account["validation_blocked_until"] = serde_json::json!(0);
                 account["validation_blocked_reason"] = serde_json::Value::Null;
+                account["validation_url"] = serde_json::Value::Null;
 
                 let updated_json =
                     serde_json::to_string_pretty(&account).map_err(|e| e.to_string())?;
@@ -1127,6 +1167,11 @@ impl TokenManager {
     ) -> Result<(String, String, String, String, u64), String> {
         let mut tokens_snapshot: Vec<ProxyToken> =
             self.tokens.iter().map(|e| e.value().clone()).collect();
+        let now = chrono::Utc::now().timestamp();
+        tokens_snapshot.retain(|token| {
+            !(token.validation_blocked && token.validation_blocked_until > now)
+        });
+
         let mut total = tokens_snapshot.len();
         if total == 0 {
             return Err("Token pool is empty".to_string());
@@ -2580,6 +2625,39 @@ impl TokenManager {
         None
     }
 
+    fn schedule_validation_recovery(account_id: String, block_until: i64) {
+        let now = chrono::Utc::now().timestamp();
+        let delay_secs = (block_until - now).max(0) as u64;
+
+        tokio::spawn(async move {
+            if delay_secs > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+            }
+
+            match crate::modules::account::clear_expired_temporary_account_state(&account_id) {
+                Ok(true) => {
+                    tracing::info!(
+                        "Validation block expired; account {} queued for recovery",
+                        account_id
+                    );
+                }
+                Ok(false) => {
+                    tracing::debug!(
+                        "Validation recovery timer fired for {}, but state was already current or extended",
+                        account_id
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to clear expired validation block for {}: {}",
+                        account_id,
+                        e
+                    );
+                }
+            }
+        });
+    }
+
     /// Set validation blocked status for an account (internal)
     pub async fn set_validation_block(&self, account_id: &str, block_until: i64, reason: &str) -> Result<(), String> {
         // 1. Update memory
@@ -2649,6 +2727,20 @@ impl TokenManager {
 
         std::fs::write(&path, json_str)
              .map_err(|e| format!("Failed to write account file: {}", e))?;
+
+        if let Err(e) = crate::modules::account::reconcile_temporary_account_state(account_id) {
+            tracing::debug!(
+                "Failed to normalize validation block state for {}: {}",
+                account_id,
+                e
+            );
+        }
+
+        crate::modules::log_bridge::emit_accounts_refreshed();
+
+        // Keep temporary validation-blocked accounts out of rotation until the timer restores them.
+        self.remove_account(account_id);
+        Self::schedule_validation_recovery(account_id.to_string(), block_until);
 
         tracing::info!(
              "🚫 Account {} validation blocked until {} (reason: {})",

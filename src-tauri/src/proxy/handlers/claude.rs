@@ -1362,14 +1362,15 @@ pub async fn handle_messages(
                         "[Claude] VALIDATION_REQUIRED confirmed after retry exhaustion on account {}",
                         account_email
                     );
-                    let block_minutes = 10i64;
-                    let block_until = chrono::Utc::now().timestamp() + (block_minutes * 60);
+                    let block_until = chrono::Utc::now().timestamp()
+                        + crate::modules::account::VALIDATION_BLOCK_SECONDS;
                     if let Err(e) = token_manager
                         .set_validation_block_public(account_id, block_until, error_text)
                         .await
                     {
                         tracing::error!("Failed to set validation block: {}", e);
                     }
+                    continue;
                 }
 
                 if let Err(e) = token_manager.set_forbidden(account_id, error_text).await {

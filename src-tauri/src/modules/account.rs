@@ -320,6 +320,78 @@ mod tests {
         println!("Backup creation on parse failure: successfully created backup");
     }
 
+    #[test]
+    fn test_expired_validation_clears_auto_proxy_disable() {
+        let now = chrono::Utc::now().timestamp();
+        let mut account = Account::new(
+            "acc-validation".to_string(),
+            "validation@example.com".to_string(),
+            TokenData::new(
+                "access".to_string(),
+                "refresh".to_string(),
+                3600,
+                Some("validation@example.com".to_string()),
+                None,
+                None,
+                true,
+                None,
+            ),
+        );
+
+        let mut quota = QuotaData::new();
+        quota.is_forbidden = true;
+        quota.forbidden_reason = Some("VALIDATION_REQUIRED".to_string());
+        account.quota = Some(quota);
+        account.proxy_disabled = true;
+        account.proxy_disabled_reason = Some("Forbidden (403): VALIDATION_REQUIRED Verify your account".to_string());
+        account.proxy_disabled_at = Some(now - 60);
+        account.validation_blocked = true;
+        account.validation_blocked_until = Some(now - 1);
+        account.validation_blocked_reason = Some("VALIDATION_REQUIRED".to_string());
+        account.validation_url = Some("https://example.com/verify".to_string());
+
+        assert!(reconcile_temporary_account_state_fields(&mut account, now));
+        assert!(!account.proxy_disabled);
+        assert!(!account.validation_blocked);
+        assert!(account.validation_blocked_until.is_none());
+        assert!(account.validation_blocked_reason.is_none());
+        assert!(account.validation_url.is_none());
+        let quota = account.quota.as_ref().unwrap();
+        assert!(!quota.is_forbidden);
+        assert!(quota.forbidden_reason.is_none());
+    }
+
+    #[test]
+    fn test_expired_validation_preserves_manual_proxy_disable() {
+        let now = chrono::Utc::now().timestamp();
+        let mut account = Account::new(
+            "acc-manual".to_string(),
+            "manual@example.com".to_string(),
+            TokenData::new(
+                "access".to_string(),
+                "refresh".to_string(),
+                3600,
+                Some("manual@example.com".to_string()),
+                None,
+                None,
+                true,
+                None,
+            ),
+        );
+
+        account.proxy_disabled = true;
+        account.proxy_disabled_reason = Some("用户手动禁用".to_string());
+        account.proxy_disabled_at = Some(now - 60);
+        account.validation_blocked = true;
+        account.validation_blocked_until = Some(now - 1);
+        account.validation_blocked_reason = Some("VALIDATION_REQUIRED".to_string());
+
+        assert!(reconcile_temporary_account_state_fields(&mut account, now));
+        assert!(account.proxy_disabled);
+        assert_eq!(account.proxy_disabled_reason.as_deref(), Some("用户手动禁用"));
+        assert!(!account.validation_blocked);
+    }
+
 }
 
 /// Global account write lock to prevent corruption during concurrent operations
@@ -329,6 +401,7 @@ static ACCOUNT_INDEX_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 const DATA_DIR: &str = ".antigravity_tools";
 const ACCOUNTS_INDEX: &str = "accounts.json";
 const ACCOUNTS_DIR: &str = "accounts";
+pub const VALIDATION_BLOCK_SECONDS: i64 = 10 * 60;
 
 /// Get data directory path
 pub fn get_data_dir() -> Result<PathBuf, String> {
@@ -683,6 +756,13 @@ pub fn list_accounts() -> Result<Vec<Account>, String> {
     let mut accounts = Vec::new();
 
     for summary in &index.accounts {
+        if let Err(e) = reconcile_temporary_account_state(&summary.id) {
+            crate::modules::logger::log_warn(&format!(
+                "Failed to reconcile temporary state for account {}: {}",
+                summary.id, e
+            ));
+        }
+
         match load_account(&summary.id) {
             Ok(account) => accounts.push(account),
             Err(e) => {
@@ -1160,15 +1240,143 @@ fn format_switch_refresh_error(message: &str) -> String {
     format!("Token refresh failed: {}", message)
 }
 
+fn is_validation_required_reason(reason: &str) -> bool {
+    let lower = reason.to_lowercase();
+    lower.contains("validation_required")
+        || lower.contains("verify your account")
+        || lower.contains("validation_url")
+        || lower.contains("appeal_url")
+        || lower.contains("validation required")
+        || lower.contains("account requires additional verification")
+        || lower.contains("账号需验证")
+        || lower.contains("需要验证")
+}
+
+fn is_auto_proxy_disabled_reason(reason: &str) -> bool {
+    let lower = reason.to_lowercase();
+    lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("validation")
+        || lower.contains("verify your account")
+        || lower.contains("quota fetch denied")
+        || lower.contains("warmup")
+        || lower.contains("scheduler")
+        || lower.contains("rate limit")
+        || lower.contains("risk control")
+        || lower.contains("frozen")
+        || lower.contains("验证")
+        || lower.contains("风控")
+        || lower.contains("冻结")
+}
+
+fn apply_validation_block_fields(account: &mut Account, reason: &str, block_until: i64) {
+    account.validation_blocked = true;
+    account.validation_blocked_until = Some(block_until);
+    account.validation_blocked_reason = Some(reason.to_string());
+}
+
+fn reconcile_temporary_account_state_fields(account: &mut Account, now: i64) -> bool {
+    let Some(block_until) = account.validation_blocked_until else {
+        return false;
+    };
+
+    if block_until <= 0
+        || (!account.validation_blocked
+            && account.validation_blocked_reason.is_none()
+            && account.validation_url.is_none())
+    {
+        return false;
+    }
+
+    let mut changed = false;
+
+    if account.proxy_disabled {
+        let reason = account.proxy_disabled_reason.as_deref().unwrap_or("");
+        if is_auto_proxy_disabled_reason(reason) {
+            account.proxy_disabled = false;
+            account.proxy_disabled_reason = None;
+            account.proxy_disabled_at = None;
+            changed = true;
+        }
+    }
+
+    if let Some(ref mut quota) = account.quota {
+        let reason = quota.forbidden_reason.as_deref().unwrap_or("");
+        if quota.is_forbidden
+            && (is_validation_required_reason(reason) || is_auto_proxy_disabled_reason(reason))
+        {
+            quota.is_forbidden = false;
+            quota.forbidden_reason = None;
+            changed = true;
+        }
+    }
+
+    if now < block_until {
+        if !account.validation_blocked {
+            account.validation_blocked = true;
+            changed = true;
+        }
+        return changed;
+    }
+
+    account.validation_blocked = false;
+    account.validation_blocked_until = None;
+    account.validation_blocked_reason = None;
+    account.validation_url = None;
+    true
+}
+
+pub fn reconcile_temporary_account_state(account_id: &str) -> Result<bool, String> {
+    let mut account = load_account(account_id)?;
+    let now = chrono::Utc::now().timestamp();
+
+    if !reconcile_temporary_account_state_fields(&mut account, now) {
+        return Ok(false);
+    }
+
+    save_account(&account)?;
+
+    {
+        let _lock = ACCOUNT_INDEX_LOCK
+            .lock()
+            .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
+        if let Ok(mut index) = load_account_index() {
+            if let Some(summary) = index.accounts.iter_mut().find(|a| a.id == account_id) {
+                summary.proxy_disabled = account.proxy_disabled;
+                summary.protected_models = account.protected_models.clone();
+                let _ = save_account_index(&index);
+            }
+        }
+    }
+
+    crate::proxy::server::trigger_account_reload(account_id);
+    crate::modules::log_bridge::emit_accounts_refreshed();
+
+    crate::modules::logger::log_info(&format!(
+        "Reconciled temporary validation state for account: {}",
+        account.email
+    ));
+
+    Ok(true)
+}
+
+pub fn clear_expired_temporary_account_state(account_id: &str) -> Result<bool, String> {
+    reconcile_temporary_account_state(account_id)
+}
+
 fn mark_validation_blocked(account: &mut Account, reason: &str) {
     if account.validation_blocked
         && account.validation_blocked_reason.as_deref() == Some(reason)
+        && account
+            .validation_blocked_until
+            .map(|until| until > chrono::Utc::now().timestamp())
+            .unwrap_or(false)
     {
         return;
     }
 
-    account.validation_blocked = true;
-    account.validation_blocked_reason = Some(reason.to_string());
+    let block_until = chrono::Utc::now().timestamp() + VALIDATION_BLOCK_SECONDS;
+    apply_validation_block_fields(account, reason, block_until);
     if let Err(e) = save_account(account) {
         crate::modules::logger::log_warn(&format!(
             "Failed to persist validation_blocked state for {}: {}",
@@ -1523,21 +1731,7 @@ pub fn clear_account_error_state_after_success(
     }
 
     let proxy_disable_reason = account.proxy_disabled_reason.as_deref().unwrap_or("");
-    let proxy_disable_reason_lower = proxy_disable_reason.to_lowercase();
-    let auto_disabled_by_error = proxy_disable_reason_lower.contains("403")
-        || proxy_disable_reason_lower.contains("forbidden")
-        || proxy_disable_reason_lower.contains("validation")
-        || proxy_disable_reason_lower.contains("quota fetch denied")
-        || proxy_disable_reason_lower.contains("warmup")
-        || proxy_disable_reason_lower.contains("scheduler")
-        || proxy_disable_reason_lower.contains("rate limit")
-        || proxy_disable_reason_lower.contains("risk control")
-        || proxy_disable_reason_lower.contains("frozen")
-        || proxy_disable_reason_lower.contains("验证")
-        || proxy_disable_reason_lower.contains("风控")
-        || proxy_disable_reason_lower.contains("冻结");
-
-    if account.proxy_disabled && auto_disabled_by_error {
+    if account.proxy_disabled && is_auto_proxy_disabled_reason(proxy_disable_reason) {
         account.proxy_disabled = false;
         account.proxy_disabled_reason = None;
         account.proxy_disabled_at = None;
@@ -1636,6 +1830,46 @@ pub fn mark_account_forbidden(account_id: &str, reason: &str) -> Result<(), Stri
         .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
 
     let mut account = load_account(account_id)?;
+
+    if is_validation_required_reason(reason) {
+        let block_until = chrono::Utc::now().timestamp() + VALIDATION_BLOCK_SECONDS;
+        apply_validation_block_fields(&mut account, reason, block_until);
+
+        if account.proxy_disabled {
+            let proxy_reason = account.proxy_disabled_reason.as_deref().unwrap_or("");
+            if is_auto_proxy_disabled_reason(proxy_reason) {
+                account.proxy_disabled = false;
+                account.proxy_disabled_reason = None;
+                account.proxy_disabled_at = None;
+            }
+        }
+
+        if let Some(ref mut quota) = account.quota {
+            if quota.is_forbidden || quota.forbidden_reason.is_some() {
+                quota.is_forbidden = false;
+                quota.forbidden_reason = None;
+            }
+        }
+
+        save_account(&account)?;
+
+        let mut index = load_account_index()?;
+        if let Some(summary) = index.accounts.iter_mut().find(|a| a.id == account_id) {
+            summary.proxy_disabled = account.proxy_disabled;
+            summary.protected_models = account.protected_models.clone();
+            save_account_index(&index)?;
+        }
+
+        crate::proxy::server::trigger_account_reload(account_id);
+        crate::modules::log_bridge::emit_accounts_refreshed();
+
+        crate::modules::logger::log_warn(&format!(
+            "Account {} temporarily validation-blocked until {}",
+            account.email, block_until
+        ));
+
+        return Ok(());
+    }
 
     // 1. Update quota status
     if let Some(ref mut q) = account.quota {
