@@ -89,6 +89,7 @@ impl TokenManager {
     /// 启动限流记录自动清理后台任务（每15秒检查并清除过期记录）
     pub async fn start_auto_cleanup(&self) {
         let tracker = self.rate_limit_tracker.clone();
+        let session_accounts = self.session_accounts.clone();
         let cancel = self.cancel_token.child_token();
 
         let handle = tokio::spawn(async move {
@@ -102,8 +103,10 @@ impl TokenManager {
                     _ = interval.tick() => {
                         let cleaned = tracker.cleanup_expired();
                         if cleaned > 0 {
+                            session_accounts.clear();
+                            crate::modules::log_bridge::emit_accounts_refreshed();
                             tracing::info!(
-                                "Auto-cleanup: Removed {} expired rate limit record(s)",
+                                "Auto-cleanup: Removed {} expired rate limit record(s), cleared sessions, and refreshed accounts",
                                 cleaned
                             );
                         }
@@ -2047,14 +2050,17 @@ impl TokenManager {
         // 【替代方案】转换 email -> account_id
         let key = self.email_to_account_id(email).unwrap_or_else(|| email.to_string());
 
-        self.rate_limit_tracker.parse_from_error(
+        if let Some(info) = self.rate_limit_tracker.parse_from_error(
             &key,
             status,
             retry_after_header,
             error_body,
             None,
             &config.backoff_steps, // [NEW] 传入配置
-        );
+        ) {
+            self.schedule_rate_limit_recovery(key, info.reset_time);
+            crate::modules::log_bridge::emit_accounts_refreshed();
+        }
     }
 
     /// 检查账号是否在限流中 (支持模型级)
@@ -2100,12 +2106,23 @@ impl TokenManager {
 
     /// 清除指定账号的限流记录
     pub fn clear_rate_limit(&self, account_id: &str) -> bool {
-        self.rate_limit_tracker.clear(account_id)
+        let cleared = self.rate_limit_tracker.clear(account_id);
+        if cleared {
+            self.session_accounts
+                .retain(|_, bound| bound.as_str() != account_id);
+            crate::proxy::server::trigger_account_reload(account_id);
+            crate::modules::log_bridge::emit_accounts_refreshed();
+        }
+        cleared
     }
 
     /// 清除所有限流记录
     pub fn clear_all_rate_limits(&self) {
-        self.rate_limit_tracker.clear_all();
+        let cleared = self.rate_limit_tracker.clear_all();
+        self.session_accounts.clear();
+        if cleared > 0 {
+            crate::modules::log_bridge::emit_accounts_refreshed();
+        }
     }
 
     /// 标记账号请求成功，重置连续失败计数
@@ -2227,7 +2244,17 @@ impl TokenManager {
 
         if let Some(reset_time_str) = self.get_quota_reset_time(account_id) {
             tracing::info!("找到账号 {} 的配额刷新时间: {}", account_id, reset_time_str);
-            self.rate_limit_tracker.set_lockout_until_iso(account_id, &reset_time_str, reason, model_to_lock)
+            let locked = self.rate_limit_tracker.set_lockout_until_iso(account_id, &reset_time_str, reason, model_to_lock);
+            if locked {
+                if let Some(wait) = self.get_rate_limit_reset_seconds(account_id) {
+                    self.schedule_rate_limit_recovery(
+                        account_id.to_string(),
+                        std::time::SystemTime::now() + std::time::Duration::from_secs(wait),
+                    );
+                    crate::modules::log_bridge::emit_accounts_refreshed();
+                }
+            }
+            locked
         } else {
             tracing::debug!("未找到账号 {} 的配额刷新时间,将使用默认退避策略", account_id);
             false
@@ -2302,7 +2329,18 @@ impl TokenManager {
                     let model_to_lock = normalized_model.or(model);
 
                     // [FIX] 使用 account_id 作为 key，与 is_rate_limited 检查一致
-                    self.rate_limit_tracker.set_lockout_until_iso(&account_id, reset_time_str, reason, model_to_lock)
+                    let locked = self.rate_limit_tracker.set_lockout_until_iso(&account_id, reset_time_str, reason, model_to_lock);
+                    if locked {
+                        if let Some(wait) = self.get_rate_limit_reset_seconds(&account_id) {
+                            self.schedule_rate_limit_recovery(
+                                account_id.clone(),
+                                std::time::SystemTime::now()
+                                    + std::time::Duration::from_secs(wait),
+                            );
+                            crate::modules::log_bridge::emit_accounts_refreshed();
+                        }
+                    }
+                    locked
                 } else {
                     tracing::warn!("账号 {} 配额刷新成功但未找到 reset_time", email);
                     false
@@ -2368,14 +2406,17 @@ impl TokenManager {
                     account_id
                 );
             }
-            self.rate_limit_tracker.parse_from_error(
+            if let Some(info) = self.rate_limit_tracker.parse_from_error(
                 &account_id,
                 status,
                 retry_after_header,
                 error_body,
                 model_to_track.map(|s| s.to_string()),
                 &config.backoff_steps, // [NEW] 传入配置
-            );
+            ) {
+                self.schedule_rate_limit_recovery(account_id.clone(), info.reset_time);
+                crate::modules::log_bridge::emit_accounts_refreshed();
+            }
             return;
         }
 
@@ -2388,14 +2429,17 @@ impl TokenManager {
             );
         }
 
-        self.rate_limit_tracker.parse_from_error(
+        if let Some(info) = self.rate_limit_tracker.parse_from_error(
             &account_id,
             status,
             retry_after_header,
             error_body,
             model_to_track.map(|s| s.to_string()),
             &config.backoff_steps,
-        );
+        ) {
+            self.schedule_rate_limit_recovery(account_id.clone(), info.reset_time);
+            crate::modules::log_bridge::emit_accounts_refreshed();
+        }
     }
 
     // ===== 调度配置相关方法 =====
@@ -2654,6 +2698,33 @@ impl TokenManager {
                         e
                     );
                 }
+            }
+        });
+    }
+
+    fn schedule_rate_limit_recovery(&self, account_id: String, reset_time: std::time::SystemTime) {
+        let tracker = self.rate_limit_tracker.clone();
+        let session_accounts = self.session_accounts.clone();
+
+        tokio::spawn(async move {
+            let delay = reset_time
+                .duration_since(std::time::SystemTime::now())
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0));
+
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+
+            let cleaned = tracker.cleanup_expired();
+            if cleaned > 0 {
+                session_accounts.clear();
+                crate::proxy::server::trigger_account_reload(&account_id);
+                crate::modules::log_bridge::emit_accounts_refreshed();
+                tracing::info!(
+                    "Rate limit expired; account {} reopened automatically ({} record(s) cleared)",
+                    account_id,
+                    cleaned
+                );
             }
         });
     }

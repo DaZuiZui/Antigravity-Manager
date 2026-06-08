@@ -494,6 +494,7 @@ impl RateLimitTracker {
     }
     
     /// 获取账号的限流信息
+    #[allow(dead_code)]
     pub fn get(&self, account_id: &str) -> Option<RateLimitInfo> {
         self.limits.get(account_id).map(|r| r.clone())
     }
@@ -507,14 +508,24 @@ impl RateLimitTracker {
     
     /// 获取距离限流重置还有多少秒
     pub fn get_reset_seconds(&self, account_id: &str) -> Option<u64> {
-        if let Some(info) = self.get(account_id) {
-            info.reset_time
-                .duration_since(SystemTime::now())
-                .ok()
-                .map(|d| d.as_secs())
-        } else {
-            None
-        }
+        let now = SystemTime::now();
+        let prefix = format!("{}:", account_id);
+
+        self.limits
+            .iter()
+            .filter_map(|entry| {
+                let key = entry.key();
+                if key != account_id && !key.starts_with(&prefix) {
+                    return None;
+                }
+
+                entry
+                    .reset_time
+                    .duration_since(now)
+                    .ok()
+                    .map(|d| d.as_secs())
+            })
+            .max()
     }
     
     /// 清除过期的限流记录
@@ -573,10 +584,12 @@ impl RateLimitTracker {
     /// 
     /// 用于乐观重置机制,当所有账号都被限流但等待时间很短时,
     /// 清除所有限流记录以解决时序竞争条件
-    pub fn clear_all(&self) {
+    pub fn clear_all(&self) -> usize {
         let count = self.limits.len();
         self.limits.clear();
+        self.failure_counts.clear();
         tracing::warn!("🔄 Optimistic reset: Cleared all {} rate limit record(s)", count);
+        count
     }
 }
 
@@ -764,6 +777,25 @@ mod tests {
             &backoff_steps,
         );
         assert_eq!(info.unwrap().retry_after_sec, 5);
+    }
+
+    #[test]
+    fn test_get_reset_seconds_includes_model_level_limits() {
+        let tracker = RateLimitTracker::new();
+        let backoff_steps = vec![5, 15, 30, 60, 120];
+        let quota_body = r#"{"error":{"details":[{"reason":"QUOTA_EXHAUSTED"}]}}"#;
+
+        tracker.parse_from_error(
+            "acc7",
+            429,
+            None,
+            quota_body,
+            Some("claude".to_string()),
+            &backoff_steps,
+        );
+
+        let wait = tracker.get_reset_seconds("acc7").unwrap_or(0);
+        assert!(wait > 0 && wait <= 5);
     }
 
     #[test]
