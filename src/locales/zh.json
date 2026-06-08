@@ -124,6 +124,7 @@
         "all": "全部",
         "available": "可用",
         "low_quota": "低配额",
+        "subscription_tier": "订阅类型",
         "ultra": "ULTRA",
         "pro": "PRO",
         "free": "FREE",

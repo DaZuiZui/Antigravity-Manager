@@ -1,4 +1,4 @@
-import { Activity, Mail, ShieldAlert, Tag } from 'lucide-react';
+import { Activity, ShieldAlert, Tag } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getValidationBlockedStatusLabel } from '../accounts/accountValidationStatus';
@@ -106,8 +106,8 @@ function getTierLabel(account: Account): string {
     return tier ? tier.toUpperCase() : 'FREE';
 }
 
-function getAccountTitle(account: Account): string {
-    return account.custom_label || account.name || account.email.split('@')[0] || account.email;
+function getAccountLabel(account: Account): string | undefined {
+    return account.custom_label || account.name;
 }
 
 function getHealthStatus(account: Account, t: ReturnType<typeof useTranslation>['t']): HealthStatus {
@@ -207,6 +207,7 @@ function AccountTooltip({
     const claude = findQuota(account, name => CLAUDE_NAMES.has(name) || name.includes('claude'));
     const lastUsed = account.last_used ? formatRelativeTime(account.last_used, language) : t('common.unknown');
     const resetTime = gemini?.reset_time || claude?.reset_time || image?.reset_time;
+    const accountLabel = getAccountLabel(account);
     const tooltipWidth = 280;
     const viewportMargin = 12;
     const showAbove = hover.y > 260;
@@ -223,12 +224,14 @@ function AccountTooltip({
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="font-semibold text-gray-900 dark:text-slate-100 truncate">
-                        {getAccountTitle(account)}
+                        {account.email}
                     </div>
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500 dark:text-slate-400">
-                        <Mail className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{account.email}</span>
-                    </div>
+                    {accountLabel && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500 dark:text-slate-400">
+                            <Tag className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{accountLabel}</span>
+                        </div>
+                    )}
                 </div>
                 <span className={cn('shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold', status.textClass, 'bg-gray-100 dark:bg-slate-800')}>
                     {status.label}
@@ -257,6 +260,12 @@ function AccountTooltip({
                 </div>
                 <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-500 dark:text-slate-400">{t('accounts.account')}</span>
+                    <span className="truncate">{account.email}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500 dark:text-slate-400">
+                        {t('accounts.subscription_tier', { defaultValue: '订阅类型' })}
+                    </span>
                     <span className="truncate">
                         {getTierLabel(account)}
                         {account.id === currentAccountId ? ` · ${t('accounts.current')}` : ''}
@@ -334,7 +343,7 @@ function AccountHealthMap({ accounts, currentAccountId }: AccountHealthMapProps)
             <div className="mt-4 overflow-x-auto pb-1">
                 {accountStatuses.length > 0 ? (
                     <div
-                        className="grid w-max grid-flow-col grid-rows-7 gap-1.5"
+                        className="flex w-max flex-row flex-nowrap items-center gap-2"
                         onMouseLeave={() => setHover(null)}
                     >
                         {accountStatuses.map(({ account, status }) => {
@@ -344,10 +353,9 @@ function AccountHealthMap({ accounts, currentAccountId }: AccountHealthMapProps)
                                     key={account.id}
                                     type="button"
                                     className={cn(
-                                        'h-3.5 w-3.5 rounded-[3px] transition-transform duration-150 hover:scale-125 focus:outline-none focus-visible:ring-2',
-                                        status.cellClass,
+                                        'group inline-flex h-9 w-64 shrink-0 items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 text-left transition-colors hover:border-gray-300 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 sm:w-72 dark:border-slate-700 dark:bg-slate-800/70 dark:hover:border-slate-600 dark:hover:bg-slate-800',
                                         status.ringClass,
-                                        isCurrent && 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-blue-400 dark:ring-offset-base-100',
+                                        isCurrent && 'border-blue-400 bg-blue-50 ring-2 ring-blue-500/40 dark:border-blue-500 dark:bg-blue-950/30',
                                     )}
                                     aria-label={`${account.email} ${status.label}`}
                                     title={`${account.email} · ${status.label}`}
@@ -377,7 +385,22 @@ function AccountHealthMap({ accounts, currentAccountId }: AccountHealthMapProps)
                                         });
                                     }}
                                     onBlur={() => setHover(null)}
-                                />
+                                >
+                                    <span
+                                        className={cn(
+                                            'h-3.5 w-3.5 shrink-0 rounded-[3px] transition-transform duration-150 group-hover:scale-110',
+                                            status.cellClass,
+                                        )}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-gray-700 dark:text-slate-200">
+                                        {account.email}
+                                    </span>
+                                    {isCurrent && (
+                                        <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                                            {t('accounts.current')}
+                                        </span>
+                                    )}
+                                </button>
                             );
                         })}
                     </div>

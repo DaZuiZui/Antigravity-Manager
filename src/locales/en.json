@@ -127,6 +127,7 @@
         "all": "All",
         "available": "Available",
         "low_quota": "Low Quota",
+        "subscription_tier": "Subscription",
         "ultra": "ULTRA",
         "pro": "PRO",
         "free": "FREE",
