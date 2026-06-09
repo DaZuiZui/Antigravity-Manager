@@ -33,6 +33,176 @@ fn record_user_token_usage(
     }
 }
 
+fn value_as_u32(value: &Value) -> Option<u32> {
+    value.as_u64().and_then(|v| u32::try_from(v).ok())
+}
+
+fn usage_u32(usage: &Value, keys: &[&str]) -> Option<u32> {
+    keys.iter()
+        .find_map(|key| usage.get(*key).and_then(value_as_u32))
+}
+
+fn sum_usage_fields(usage: &Value, keys: &[&str]) -> Option<u32> {
+    let mut total = 0u32;
+    let mut found = false;
+
+    for key in keys {
+        if let Some(value) = usage.get(*key).and_then(value_as_u32) {
+            total = total.saturating_add(value);
+            found = true;
+        }
+    }
+
+    found.then_some(total)
+}
+
+fn sum_token_detail_array(usage: &Value, key: &str) -> Option<u32> {
+    let details = usage.get(key)?.as_array()?;
+    let mut total = 0u32;
+    let mut found = false;
+
+    for detail in details {
+        let Some(token_count) = usage_u32(detail, &["tokenCount", "token_count", "tokens"]) else {
+            continue;
+        };
+        total = total.saturating_add(token_count);
+        found = true;
+    }
+
+    found.then_some(total)
+}
+
+fn extract_usage_value(json: &Value) -> Option<&Value> {
+    json.get("usage")
+        .or_else(|| json.get("usageMetadata"))
+        .or_else(|| {
+            json.get("response").and_then(|response| {
+                response
+                    .get("usage")
+                    .or_else(|| response.get("usageMetadata"))
+            })
+        })
+}
+
+fn is_cache_creation_request(url: &str) -> bool {
+    url.contains("/cachedContents")
+        || url.contains("/cached_contents")
+        || url.contains("/caches")
+        || url.contains(":createCachedContent")
+}
+
+fn extract_cache_read_tokens(usage: &Value) -> Option<u32> {
+    usage_u32(
+        usage,
+        &[
+            "cache_read_input_tokens",
+            "cache_read_tokens",
+            "cachedContentTokenCount",
+            "cached_content_token_count",
+        ],
+    )
+    .or_else(|| {
+        usage
+            .get("prompt_tokens_details")
+            .and_then(|details| usage_u32(details, &["cached_tokens", "cache_read_tokens"]))
+    })
+    .or_else(|| sum_token_detail_array(usage, "cacheTokensDetails"))
+    .or_else(|| sum_token_detail_array(usage, "cache_tokens_details"))
+}
+
+fn extract_cache_creation_tokens(usage: &Value, url: &str) -> Option<u32> {
+    usage_u32(
+        usage,
+        &[
+            "cache_creation_input_tokens",
+            "cache_creation_tokens",
+            "cached_creation_tokens",
+            "cache_write_input_tokens",
+            "cache_write_tokens",
+            "cachedContentCreationTokenCount",
+            "cached_content_creation_token_count",
+        ],
+    )
+    .or_else(|| {
+        usage.get("prompt_tokens_details").and_then(|details| {
+            usage_u32(
+                details,
+                &[
+                    "cached_creation_tokens",
+                    "cache_creation_tokens",
+                    "cache_write_tokens",
+                ],
+            )
+        })
+    })
+    .or_else(|| {
+        usage
+            .get("cache_creation")
+            .and_then(|cache_creation| {
+                sum_usage_fields(
+                    cache_creation,
+                    &["ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"],
+                )
+            })
+    })
+    .or_else(|| {
+        sum_usage_fields(
+            usage,
+            &[
+                "claude_cache_creation_5_m_tokens",
+                "claude_cache_creation_1_h_tokens",
+            ],
+        )
+    })
+    .or_else(|| {
+        is_cache_creation_request(url).then(|| {
+            usage_u32(
+                usage,
+                &[
+                    "totalTokenCount",
+                    "total_tokens",
+                    "promptTokenCount",
+                    "prompt_tokens",
+                    "input_tokens",
+                ],
+            )
+        })?
+    })
+}
+
+fn apply_usage_to_log(log: &mut ProxyRequestLog, usage: &Value, url: &str) {
+    let input_tokens = usage_u32(
+        usage,
+        &["prompt_tokens", "input_tokens", "promptTokenCount"],
+    );
+    let output_tokens = usage_u32(
+        usage,
+        &["completion_tokens", "output_tokens", "candidatesTokenCount"],
+    );
+
+    if let Some(input_tokens) = input_tokens {
+        log.input_tokens = Some(input_tokens);
+    }
+    if let Some(output_tokens) = output_tokens {
+        log.output_tokens = Some(output_tokens);
+    }
+
+    if input_tokens.is_none()
+        && output_tokens.is_none()
+        && log.input_tokens.is_none()
+        && log.output_tokens.is_none()
+    {
+        log.output_tokens = usage_u32(usage, &["total_tokens", "totalTokenCount"]);
+    }
+
+    if let Some(cache_read) = extract_cache_read_tokens(usage) {
+        log.cache_read_input_tokens = Some(cache_read);
+    }
+    if let Some(cache_creation) = extract_cache_creation_tokens(usage, url) {
+        log.cache_creation_input_tokens = Some(cache_creation);
+    }
+}
+
 pub async fn monitor_middleware(
     State(state): State<AppState>,
     request: Request,
@@ -141,7 +311,7 @@ pub async fn monitor_middleware(
     // Determine protocol from URL path
     let protocol = if uri.contains("/v1/messages") {
         Some("anthropic".to_string())
-    } else if uri.contains("/v1beta/models") {
+    } else if uri.contains("/v1beta/models") || uri.contains("/v1beta/cachedContents") {
         Some("gemini".to_string())
     } else if uri.starts_with("/v1/") {
         Some("openai".to_string())
@@ -159,7 +329,7 @@ pub async fn monitor_middleware(
         id: uuid::Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now().timestamp_millis(),
         method,
-        url: uri,
+        url: uri.clone(),
         status,
         duration,
         model,
@@ -171,6 +341,8 @@ pub async fn monitor_middleware(
         response_body: None,
         input_tokens: None,
         output_tokens: None,
+        cache_read_input_tokens: None,
+        cache_creation_input_tokens: None,
         protocol,
         username,
     };
@@ -336,27 +508,8 @@ pub async fn monitor_middleware(
                         }
                         
                         // Token usage extraction
-                        if let Some(usage) = json.get("usage")
-                            .or(json.get("usageMetadata"))
-                            .or(json.get("response").and_then(|r| r.get("usage")))
-                        {
-                            log.input_tokens = usage.get("prompt_tokens")
-                                .or(usage.get("input_tokens"))
-                                .or(usage.get("promptTokenCount"))
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            log.output_tokens = usage.get("completion_tokens")
-                                .or(usage.get("output_tokens"))
-                                .or(usage.get("candidatesTokenCount"))
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            
-                            if log.input_tokens.is_none() && log.output_tokens.is_none() {
-                                log.output_tokens = usage.get("total_tokens")
-                                    .or(usage.get("totalTokenCount"))
-                                    .and_then(|v| v.as_u64())
-                                    .map(|v| v as u32);
-                            }
+                        if let Some(usage) = extract_usage_value(&json) {
+                            apply_usage_to_log(&mut log, usage, &uri);
                         }
                     }
                 }
@@ -386,6 +539,12 @@ pub async fn monitor_middleware(
                 if let Some(output) = log.output_tokens {
                     consolidated.insert("output_tokens".to_string(), Value::Number(output.into()));
                 }
+                if let Some(cache_read) = log.cache_read_input_tokens {
+                    consolidated.insert("cache_read_input_tokens".to_string(), Value::Number(cache_read.into()));
+                }
+                if let Some(cache_creation) = log.cache_creation_input_tokens {
+                    consolidated.insert("cache_creation_input_tokens".to_string(), Value::Number(cache_creation.into()));
+                }
                 
                 if consolidated.is_empty() {
                     // Fallback: store raw SSE data if parsing failed
@@ -404,20 +563,8 @@ pub async fn monitor_middleware(
                         if line.starts_with("data: ") && (line.contains("\"usage\"") || line.contains("\"usageMetadata\"")) {
                             let json_str = line.trim_start_matches("data: ").trim();
                             if let Ok(json) = serde_json::from_str::<Value>(json_str) {
-                                if let Some(usage) = json.get("usage")
-                                    .or(json.get("usageMetadata"))
-                                    .or(json.get("response").and_then(|r| r.get("usage")))
-                                {
-                                    log.input_tokens = usage.get("prompt_tokens")
-                                        .or(usage.get("input_tokens"))
-                                        .or(usage.get("promptTokenCount"))
-                                        .and_then(|v| v.as_u64())
-                                        .map(|v| v as u32);
-                                    log.output_tokens = usage.get("completion_tokens")
-                                        .or(usage.get("output_tokens"))
-                                        .or(usage.get("candidatesTokenCount"))
-                                        .and_then(|v| v.as_u64())
-                                        .map(|v| v as u32);
+                                if let Some(usage) = extract_usage_value(&json) {
+                                    apply_usage_to_log(&mut log, usage, &uri);
                                     break;
                                 }
                             }
@@ -444,24 +591,8 @@ pub async fn monitor_middleware(
                 if let Ok(s) = std::str::from_utf8(&bytes) {
                     if let Ok(json) = serde_json::from_str::<Value>(&s) {
                         // 支持 OpenAI "usage" 或 Gemini "usageMetadata"
-                        if let Some(usage) = json.get("usage").or(json.get("usageMetadata")) {
-                            log.input_tokens = usage.get("prompt_tokens")
-                                .or(usage.get("input_tokens"))
-                                .or(usage.get("promptTokenCount"))
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            log.output_tokens = usage.get("completion_tokens")
-                                .or(usage.get("output_tokens"))
-                                .or(usage.get("candidatesTokenCount"))
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                                
-                            if log.input_tokens.is_none() && log.output_tokens.is_none() {
-                                log.output_tokens = usage.get("total_tokens")
-                                    .or(usage.get("totalTokenCount"))
-                                    .and_then(|v| v.as_u64())
-                                    .map(|v| v as u32);
-                            }
+                        if let Some(usage) = extract_usage_value(&json) {
+                            apply_usage_to_log(&mut log, usage, &uri);
                         }
                     }
                     log.response_body = Some(s.to_string());

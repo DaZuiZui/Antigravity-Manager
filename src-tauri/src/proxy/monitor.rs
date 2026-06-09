@@ -21,6 +21,8 @@ pub struct ProxyRequestLog {
     pub response_body: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    pub cache_read_input_tokens: Option<u32>,
+    pub cache_creation_input_tokens: Option<u32>,
     pub protocol: Option<String>,     // 协议类型: "openai", "anthropic", "gemini"
     pub username: Option<String>,     // User token username
 }
@@ -177,6 +179,8 @@ impl ProxyMonitor {
                 response_body: None, // Don't send body in event
                 input_tokens: log.input_tokens,
                 output_tokens: log.output_tokens,
+                cache_read_input_tokens: log.cache_read_input_tokens,
+                cache_creation_input_tokens: log.cache_creation_input_tokens,
                 protocol: log.protocol.clone(),
                 username: log.username.clone(),
             };

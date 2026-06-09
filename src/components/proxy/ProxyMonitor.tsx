@@ -26,6 +26,8 @@ interface ProxyRequestLog {
     response_body?: string;
     input_tokens?: number;
     output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
     account_email?: string;
     protocol?: string;  // "openai" | "anthropic" | "gemini"
 }
@@ -67,7 +69,7 @@ const LogTable: React.FC<LogTableProps> = ({
                         <th style={{ width: '70px' }}>{t('monitor.table.protocol')}</th>
                         <th style={{ width: '140px' }}>{t('monitor.table.account')}</th>
                         <th style={{ width: '180px' }}>{t('monitor.table.path')}</th>
-                        <th className="text-right" style={{ width: '90px' }}>{t('monitor.table.usage')}</th>
+                        <th className="text-right" style={{ width: '120px' }}>{t('monitor.table.usage')}</th>
                         <th className="text-right" style={{ width: '80px' }}>{t('monitor.table.duration')}</th>
                         <th className="text-right" style={{ width: '80px' }}>{t('monitor.table.time')}</th>
                     </tr>
@@ -106,9 +108,21 @@ const LogTable: React.FC<LogTableProps> = ({
                                 {log.account_email ? log.account_email.replace(/(.{3}).*(@.*)/, '$1***$2') : '-'}
                             </td>
                             <td className="truncate" style={{ width: '180px', maxWidth: '180px' }}>{log.url}</td>
-                            <td className="text-right text-[9px]" style={{ width: '90px' }}>
-                                {log.input_tokens != null && <div>I: {formatCompactNumber(log.input_tokens)}</div>}
-                                {log.output_tokens != null && <div>O: {formatCompactNumber(log.output_tokens)}</div>}
+                            <td className="text-right text-[9px]" style={{ width: '120px' }}>
+                                <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0.5 leading-tight">
+                                    {log.input_tokens != null && <span>I: {formatCompactNumber(log.input_tokens)}</span>}
+                                    {log.output_tokens != null && <span>O: {formatCompactNumber(log.output_tokens)}</span>}
+                                    {log.cache_read_input_tokens != null && (
+                                        <span className="text-cyan-600 dark:text-cyan-400" title={t('monitor.details.cache_read', 'Cache Read')}>
+                                            R: {formatCompactNumber(log.cache_read_input_tokens)}
+                                        </span>
+                                    )}
+                                    {log.cache_creation_input_tokens != null && (
+                                        <span className="text-amber-600 dark:text-amber-400" title={t('monitor.details.cache_write', 'Cache Write')}>
+                                            W: {formatCompactNumber(log.cache_creation_input_tokens)}
+                                        </span>
+                                    )}
+                                </div>
                             </td>
                             <td className="text-right" style={{ width: '80px' }}>{log.duration}ms</td>
                             <td className="text-right text-[10px]" style={{ width: '80px' }}>
@@ -603,9 +617,11 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                                     </div>
                                     <div className="space-y-1.5">
                                         <span className="block text-gray-500 dark:text-gray-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.tokens')}</span>
-                                        <div className="font-mono text-[11px] flex gap-2">
+                                        <div className="font-mono text-[11px] flex flex-wrap gap-2">
                                             <span className="text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 rounded-md border border-blue-200 dark:border-blue-800/50 font-bold">In: {formatCompactNumber(selectedLog.input_tokens ?? 0)}</span>
                                             <span className="text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/40 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-800/50 font-bold">Out: {formatCompactNumber(selectedLog.output_tokens ?? 0)}</span>
+                                            <span className="text-cyan-700 dark:text-cyan-300 bg-cyan-100 dark:bg-cyan-900/40 px-2.5 py-1 rounded-md border border-cyan-200 dark:border-cyan-800/50 font-bold">{t('monitor.details.cache_read', 'Cache Read')}: {formatCompactNumber(selectedLog.cache_read_input_tokens ?? 0)}</span>
+                                            <span className="text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 rounded-md border border-amber-200 dark:border-amber-800/50 font-bold">{t('monitor.details.cache_write', 'Cache Write')}: {formatCompactNumber(selectedLog.cache_creation_input_tokens ?? 0)}</span>
                                         </div>
                                     </div>
                                 </div>

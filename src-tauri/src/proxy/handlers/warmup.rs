@@ -256,6 +256,8 @@ pub async fn handle_warmup(
                 response_body: None,
                 input_tokens: Some(0),
                 output_tokens: Some(0),
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 protocol: Some("warmup".to_string()),
                 username: None,
             };
@@ -350,6 +352,8 @@ pub async fn handle_warmup(
                 response_body: Some(e.clone()),
                 input_tokens: None,
                 output_tokens: None,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
                 protocol: Some("warmup".to_string()),
                 username: None,
             };
