@@ -1,5 +1,5 @@
 // 模型名称映射
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use once_cell::sync::Lazy;
 use dashmap::DashMap;
 
@@ -331,6 +331,27 @@ pub fn normalize_to_standard_id(model_name: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Normalize either a physical model name or an already-standard model group
+/// to the quota-protection group used by protected_models.
+pub fn normalize_to_protection_group(model_name: &str) -> String {
+    normalize_to_standard_id(model_name).unwrap_or_else(|| model_name.to_string())
+}
+
+/// Normalize and deduplicate quota-protection monitored model entries.
+pub fn normalize_protection_groups(models: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut groups = Vec::new();
+
+    for model in models {
+        let group = normalize_to_protection_group(model);
+        if seen.insert(group.clone()) {
+            groups.push(group);
+        }
+    }
+
+    groups
 }
 
 #[cfg(test)]
