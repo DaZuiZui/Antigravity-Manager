@@ -607,10 +607,14 @@ function Accounts() {
       return next;
     });
     try {
-      await invoke('clear_account_model_protection', { accountId, modelId: 'claude' });
+      const changed = await invoke<boolean>('clear_account_model_protection', { accountId, modelId: 'claude' });
       await invoke('clear_proxy_session_bindings').catch(() => null);
       await fetchAccounts();
-      showToast(t('accounts.claude_protection_cleared', '已取消该账号的 Claude 保护'), 'success');
+      if (changed) {
+        showToast(t('accounts.claude_protection_cleared', '已取消该账号的 Claude 保护'), 'success');
+      } else {
+        showToast(t('accounts.claude_protection_not_found', '该账号当前没有 Claude 保护记录'), 'info');
+      }
     } catch (error) {
       showToast(`${t("common.error")}: ${error}`, "error");
     } finally {

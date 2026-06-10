@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -83,6 +83,44 @@ mod tests {
         let content = serde_json::to_string_pretty(&account).expect("Failed to serialize account");
         let account_path = accounts_dir.join(format!("{}.json", account_id));
         fs::write(&account_path, content).expect("Failed to write account file");
+    }
+
+    fn test_account() -> Account {
+        Account::new(
+            "test-id".to_string(),
+            "user@example.com".to_string(),
+            TokenData::new(
+                "test_access_token".to_string(),
+                "test_refresh_token".to_string(),
+                3600,
+                Some("user@example.com".to_string()),
+                None,
+                None,
+                true,
+                None,
+            ),
+        )
+    }
+
+    #[test]
+    fn test_remove_protected_model_group_matches_claude_aliases() {
+        let mut account = test_account();
+        account.protected_models.insert("claude-sonnet-4-6-thinking".to_string());
+        account.protected_models.insert("gemini-3-flash".to_string());
+
+        assert!(remove_protected_model_group(&mut account, "claude"));
+        assert!(!has_model_group(&account.protected_models, "claude-opus-4-6-thinking"));
+        assert!(has_model_group(&account.protected_models, "gemini-3-flash"));
+    }
+
+    #[test]
+    fn test_add_protection_bypass_model_group_normalizes_claude() {
+        let mut account = test_account();
+
+        assert!(add_protection_bypass_model_group(&mut account, "claude-opus-4-6-thinking"));
+        assert!(!add_protection_bypass_model_group(&mut account, "claude"));
+        assert!(has_model_group(&account.protection_bypass_models, "claude"));
+        assert_eq!(account.protection_bypass_models.len(), 1);
     }
 
     #[test]
@@ -1633,11 +1671,29 @@ pub fn update_account_quota(account_id: &str, quota: QuotaData) -> Result<(), St
                     }
                 }
 
-                for std_id in &config.quota_protection.monitored_models {
+                let monitored_models =
+                    crate::proxy::common::model_mapping::normalize_protection_groups(
+                        &config.quota_protection.monitored_models,
+                    );
+                let monitored_model_set: HashSet<String> =
+                    monitored_models.iter().cloned().collect();
+
+                account.protected_models.retain(|model| {
+                    monitored_model_set.contains(&normalize_protection_group(model))
+                });
+                account.protection_bypass_models.retain(|model| {
+                    monitored_model_set.contains(&normalize_protection_group(model))
+                });
+
+                for std_id in &monitored_models {
                     let min_pct = group_min_percentage.get(std_id).cloned().unwrap_or(100);
 
                     if min_pct <= threshold {
-                        if !account.protected_models.contains(std_id) {
+                        if has_model_group(&account.protection_bypass_models, std_id) {
+                            continue;
+                        }
+
+                        if !has_model_group(&account.protected_models, std_id) {
                             crate::modules::logger::log_info(&format!(
                                 "[Quota] Triggering model protection: {} (Group: {} Min: {}% <= Thres: {}%)",
                                 account.email, std_id, min_pct, threshold
@@ -1645,13 +1701,14 @@ pub fn update_account_quota(account_id: &str, quota: QuotaData) -> Result<(), St
                             account.protected_models.insert(std_id.clone());
                         }
                     } else {
-                        if account.protected_models.contains(std_id) {
+                        if has_model_group(&account.protected_models, std_id) {
                             crate::modules::logger::log_info(&format!(
                                 "[Quota] Model protection recovered: {} (Group: {} Min: {}% > Thres: {}%)",
                                 account.email, std_id, min_pct, threshold
                             ));
-                            account.protected_models.remove(std_id);
+                            remove_model_group_from_set(&mut account.protected_models, std_id);
                         }
+                        remove_model_group_from_set(&mut account.protection_bypass_models, std_id);
                     }
                 }
 
@@ -1778,17 +1835,37 @@ pub fn clear_account_error_state_after_success(
     Ok(true)
 }
 
+fn normalize_protection_group(model_id: &str) -> String {
+    crate::proxy::common::model_mapping::normalize_to_standard_id(model_id)
+        .unwrap_or_else(|| model_id.to_string())
+}
+
+fn has_model_group(models: &HashSet<String>, model_id: &str) -> bool {
+    let target_group = normalize_protection_group(model_id);
+    models
+        .iter()
+        .any(|model| normalize_protection_group(model) == target_group)
+}
+
+fn remove_model_group_from_set(models: &mut HashSet<String>, model_id: &str) -> bool {
+    let target_group = normalize_protection_group(model_id);
+    let original_len = models.len();
+    models.retain(|model| normalize_protection_group(model) != target_group);
+    models.len() != original_len
+}
+
+fn add_protection_bypass_model_group(account: &mut Account, model_id: &str) -> bool {
+    if has_model_group(&account.protection_bypass_models, model_id) {
+        return false;
+    }
+
+    account
+        .protection_bypass_models
+        .insert(normalize_protection_group(model_id))
+}
+
 fn remove_protected_model_group(account: &mut Account, model_id: &str) -> bool {
-    let target_group = crate::proxy::common::model_mapping::normalize_to_standard_id(model_id)
-        .unwrap_or_else(|| model_id.to_string());
-    let original_len = account.protected_models.len();
-    account.protected_models.retain(|protected_model| {
-        let protected_group =
-            crate::proxy::common::model_mapping::normalize_to_standard_id(protected_model)
-                .unwrap_or_else(|| protected_model.to_string());
-        protected_group != target_group
-    });
-    account.protected_models.len() != original_len
+    remove_model_group_from_set(&mut account.protected_models, model_id)
 }
 
 pub fn clear_account_model_protection(account_id: &str, model_id: &str) -> Result<bool, String> {
@@ -1797,6 +1874,7 @@ pub fn clear_account_model_protection(account_id: &str, model_id: &str) -> Resul
     if !remove_protected_model_group(&mut account, model_id) {
         return Ok(false);
     }
+    add_protection_bypass_model_group(&mut account, model_id);
 
     save_account(&account)?;
 

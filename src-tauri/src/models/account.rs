@@ -40,6 +40,9 @@ pub struct Account {
     /// 受配额保护禁用的模型列表 [NEW #621]
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub protected_models: HashSet<String>,
+    /// 用户手动取消的模型保护分组；配额恢复后自动清理。
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub protection_bypass_models: HashSet<String>,
     /// [NEW] 403 验证阻止状态 (VALIDATION_REQUIRED)
     #[serde(default)]
     pub validation_blocked: bool,
@@ -105,6 +108,7 @@ impl Account {
             proxy_disabled_reason: None,
             proxy_disabled_at: None,
             protected_models: HashSet::new(),
+            protection_bypass_models: HashSet::new(),
             validation_blocked: false,
             validation_blocked_until: None,
             validation_blocked_reason: None,

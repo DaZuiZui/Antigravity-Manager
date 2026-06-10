@@ -753,7 +753,7 @@ impl TokenManager {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str())
-                    .map(|s| s.to_string())
+                    .map(Self::normalize_protection_group)
                     .collect()
             })
             .unwrap_or_default();
@@ -955,22 +955,20 @@ impl TokenManager {
             .to_string();
         let mut changed = false;
 
-        // 清理已经从监控列表移除的旧保护状态，例如关闭 Claude 保护后遗留的 claude。
-        if let Some(arr) = account_json
-            .get_mut("protected_models")
-            .and_then(|v| v.as_array_mut())
-        {
-            let original_len = arr.len();
-            arr.retain(|m| {
-                m.as_str().map_or(false, |name| {
-                    let group =
-                        crate::proxy::common::model_mapping::normalize_to_protection_group(name);
-                    monitored_model_set.contains(&group)
-                })
-            });
-            if arr.len() < original_len {
-                changed = true;
-            }
+        // 清理已经从监控列表移除的旧保护/手动绕过状态，例如关闭 Claude 保护后遗留的 claude。
+        if Self::retain_monitored_model_groups(
+            account_json,
+            "protected_models",
+            &monitored_model_set,
+        ) {
+            changed = true;
+        }
+        if Self::retain_monitored_model_groups(
+            account_json,
+            "protection_bypass_models",
+            &monitored_model_set,
+        ) {
+            changed = true;
         }
 
         for std_id in &monitored_models {
@@ -978,6 +976,14 @@ impl TokenManager {
             let min_pct = group_min_percentage.get(std_id).cloned().unwrap_or(100);
 
             if min_pct <= threshold {
+                if Self::json_array_contains_model_group(
+                    account_json,
+                    "protection_bypass_models",
+                    std_id,
+                ) {
+                    continue;
+                }
+
                 // 只要组内有一个不行，触发全组保护
                 if self
                     .trigger_quota_protection(
@@ -995,13 +1001,16 @@ impl TokenManager {
                 }
             } else {
                 // 只有全组都好（或者没这型号），才尝试从之前受限状态恢复
-                let protected_models = account_json
-                    .get("protected_models")
-                    .and_then(|v| v.as_array());
+                if Self::remove_model_group_from_json_array(
+                    account_json,
+                    "protection_bypass_models",
+                    std_id,
+                ) {
+                    changed = true;
+                }
 
-                let is_protected = protected_models.map_or(false, |arr| {
-                    arr.iter().any(|m| m.as_str() == Some(std_id as &str))
-                });
+                let is_protected =
+                    Self::json_array_contains_model_group(account_json, "protected_models", std_id);
 
                 if is_protected {
                     if self
@@ -1186,6 +1195,65 @@ impl TokenManager {
         Self::get_model_quota_from_json(account_path, model_name)
     }
 
+    fn normalize_protection_group(model_name: &str) -> String {
+        crate::proxy::common::model_mapping::normalize_to_protection_group(model_name)
+    }
+
+    fn json_array_contains_model_group(
+        account_json: &serde_json::Value,
+        field: &str,
+        model_name: &str,
+    ) -> bool {
+        let target_group = Self::normalize_protection_group(model_name);
+        account_json
+            .get(field)
+            .and_then(|v| v.as_array())
+            .map_or(false, |arr| {
+                arr.iter().any(|model| {
+                    model.as_str().map_or(false, |name| {
+                        Self::normalize_protection_group(name) == target_group
+                    })
+                })
+            })
+    }
+
+    fn remove_model_group_from_json_array(
+        account_json: &mut serde_json::Value,
+        field: &str,
+        model_name: &str,
+    ) -> bool {
+        let target_group = Self::normalize_protection_group(model_name);
+        let Some(arr) = account_json.get_mut(field).and_then(|v| v.as_array_mut()) else {
+            return false;
+        };
+
+        let original_len = arr.len();
+        arr.retain(|model| {
+            model.as_str().map_or(true, |name| {
+                Self::normalize_protection_group(name) != target_group
+            })
+        });
+        arr.len() != original_len
+    }
+
+    fn retain_monitored_model_groups(
+        account_json: &mut serde_json::Value,
+        field: &str,
+        monitored_model_set: &HashSet<String>,
+    ) -> bool {
+        let Some(arr) = account_json.get_mut(field).and_then(|v| v.as_array_mut()) else {
+            return false;
+        };
+
+        let original_len = arr.len();
+        arr.retain(|model| {
+            model.as_str().map_or(false, |name| {
+                monitored_model_set.contains(&Self::normalize_protection_group(name))
+            })
+        });
+        arr.len() != original_len
+    }
+
     /// 触发配额保护，限制特定模型 (Issue #621)
     /// 返回 true 如果发生了改变
     async fn trigger_quota_protection(
@@ -1197,19 +1265,29 @@ impl TokenManager {
         threshold: i32,
         model_name: &str,
     ) -> Result<bool, String> {
+        if Self::json_array_contains_model_group(
+            account_json,
+            "protection_bypass_models",
+            model_name,
+        ) {
+            return Ok(false);
+        }
+
         // 1. 初始化 protected_models 数组（如果不存在）
         if account_json.get("protected_models").is_none() {
             account_json["protected_models"] = serde_json::Value::Array(Vec::new());
         }
 
         let protected_models = account_json["protected_models"].as_array_mut().unwrap();
+        let model_group = Self::normalize_protection_group(model_name);
 
         // 2. 检查是否已存在
-        if !protected_models
-            .iter()
-            .any(|m| m.as_str() == Some(model_name))
-        {
-            protected_models.push(serde_json::Value::String(model_name.to_string()));
+        if !protected_models.iter().any(|m| {
+            m.as_str().map_or(false, |name| {
+                Self::normalize_protection_group(name) == model_group
+            })
+        }) {
+            protected_models.push(serde_json::Value::String(model_group));
 
             tracing::info!(
                 "账号 {} 的模型 {} 因配额受限（{}% <= {}%）已被加入保护列表",
@@ -1259,11 +1337,19 @@ impl TokenManager {
 
         let threshold = config.threshold_percentage as i32;
         let mut protected_list = Vec::new();
+        let mut protected_seen = HashSet::new();
+        let monitored_model_set: HashSet<String> =
+            crate::proxy::common::model_mapping::normalize_protection_groups(
+                &config.monitored_models,
+            )
+            .into_iter()
+            .collect();
 
         if let Some(models) = quota.get("models").and_then(|m| m.as_array()) {
             for model in models {
                 let name = model.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if !config.monitored_models.iter().any(|m| m == name) {
+                let std_id = Self::normalize_protection_group(name);
+                if !monitored_model_set.contains(&std_id) {
                     continue;
                 }
 
@@ -1271,8 +1357,15 @@ impl TokenManager {
                     .get("percentage")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0) as i32;
-                if percentage <= threshold {
-                    protected_list.push(serde_json::Value::String(name.to_string()));
+                if percentage <= threshold
+                    && !Self::json_array_contains_model_group(
+                        account_json,
+                        "protection_bypass_models",
+                        &std_id,
+                    )
+                    && protected_seen.insert(std_id.clone())
+                {
+                    protected_list.push(serde_json::Value::String(std_id));
                 }
             }
         }
@@ -1296,26 +1389,18 @@ impl TokenManager {
         account_path: &PathBuf,
         model_name: &str,
     ) -> Result<bool, String> {
-        if let Some(arr) = account_json
-            .get_mut("protected_models")
-            .and_then(|v| v.as_array_mut())
-        {
-            let original_len = arr.len();
-            arr.retain(|m| m.as_str() != Some(model_name));
-
-            if arr.len() < original_len {
-                tracing::info!(
-                    "账号 {} 的模型 {} 配额已恢复，移出保护列表",
-                    account_id,
-                    model_name
-                );
-                std::fs::write(
-                    account_path,
-                    serde_json::to_string_pretty(account_json).unwrap(),
-                )
-                .map_err(|e| format!("写入文件失败: {}", e))?;
-                return Ok(true);
-            }
+        if Self::remove_model_group_from_json_array(account_json, "protected_models", model_name) {
+            tracing::info!(
+                "账号 {} 的模型 {} 配额已恢复，移出保护列表",
+                account_id,
+                model_name
+            );
+            std::fs::write(
+                account_path,
+                serde_json::to_string_pretty(account_json).unwrap(),
+            )
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+            return Ok(true);
         }
 
         Ok(false)

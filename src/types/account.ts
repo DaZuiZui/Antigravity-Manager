@@ -13,6 +13,7 @@ export interface Account {
     proxy_disabled_reason?: string;
     proxy_disabled_at?: number;
     protected_models?: string[];
+    protection_bypass_models?: string[];
     custom_label?: string;  // 用户自定义标签
     validation_blocked?: boolean;
     validation_blocked_until?: number;

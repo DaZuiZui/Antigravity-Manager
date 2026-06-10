@@ -41,5 +41,5 @@ export function hasActiveProtectedModels(account: Account, config: AppConfig | n
 
 export function shouldShowClaudeProtection(account: Account, config: AppConfig | null | undefined): boolean {
     if (!isProtectionGroupMonitored(config, 'claude')) return false;
-    return Boolean(account.protected_models?.some(model => model.toLowerCase().includes('claude')));
+    return Boolean(account.protected_models?.some(model => normalizeProtectionGroup(model) === 'claude'));
 }
