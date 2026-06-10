@@ -1739,11 +1739,8 @@ pub fn clear_account_error_state_after_success(
     }
 
     if let Some(model_id) = model_id {
-        if let Some(std_id) = crate::proxy::common::model_mapping::normalize_to_standard_id(model_id)
-        {
-            if account.protected_models.remove(&std_id) {
-                changed = true;
-            }
+        if remove_protected_model_group(&mut account, model_id) {
+            changed = true;
         }
     } else if !account.protected_models.is_empty() {
         account.protected_models.clear();
@@ -1776,6 +1773,50 @@ pub fn clear_account_error_state_after_success(
         "Cleared stale account error state after successful test: {} ({})",
         account.email,
         model_id.unwrap_or("unknown model")
+    ));
+
+    Ok(true)
+}
+
+fn remove_protected_model_group(account: &mut Account, model_id: &str) -> bool {
+    let target_group = crate::proxy::common::model_mapping::normalize_to_standard_id(model_id)
+        .unwrap_or_else(|| model_id.to_string());
+    let original_len = account.protected_models.len();
+    account.protected_models.retain(|protected_model| {
+        let protected_group =
+            crate::proxy::common::model_mapping::normalize_to_standard_id(protected_model)
+                .unwrap_or_else(|| protected_model.to_string());
+        protected_group != target_group
+    });
+    account.protected_models.len() != original_len
+}
+
+pub fn clear_account_model_protection(account_id: &str, model_id: &str) -> Result<bool, String> {
+    let mut account = load_account(account_id)?;
+
+    if !remove_protected_model_group(&mut account, model_id) {
+        return Ok(false);
+    }
+
+    save_account(&account)?;
+
+    {
+        let _lock = ACCOUNT_INDEX_LOCK
+            .lock()
+            .map_err(|e| format!("failed_to_acquire_lock: {}", e))?;
+        if let Ok(mut index) = load_account_index() {
+            if let Some(summary) = index.accounts.iter_mut().find(|a| a.id == account_id) {
+                summary.protected_models = account.protected_models.clone();
+                let _ = save_account_index(&index);
+            }
+        }
+    }
+
+    crate::proxy::server::trigger_account_reload(account_id);
+    crate::modules::log_bridge::emit_accounts_refreshed();
+    crate::modules::logger::log_info(&format!(
+        "Cleared account model protection: {} ({})",
+        account.email, model_id
     ));
 
     Ok(true)

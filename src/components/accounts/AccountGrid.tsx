@@ -18,6 +18,7 @@ interface AccountGridProps {
     onToggleProxy: (accountId: string) => void;
     onConfigureProxy: (accountId: string) => void;
     onClearLimit: (accountId: string) => void;
+    onClearClaudeProtection: (accountId: string) => void;
     onTestClaude: (accountId: string) => void;
     onWarmup?: (accountId: string) => void;
     onUpdateLabel?: (accountId: string, label: string) => void;
@@ -25,7 +26,7 @@ interface AccountGridProps {
 }
 
 
-function AccountGrid({ accounts, selectedIds, refreshingIds, onToggleSelect, currentAccountId, switchingAccountId, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountGridProps) {
+function AccountGrid({ accounts, selectedIds, refreshingIds, onToggleSelect, currentAccountId, switchingAccountId, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onClearClaudeProtection, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountGridProps) {
     const { t } = useTranslation();
     if (accounts.length === 0) {
         return (
@@ -56,6 +57,7 @@ function AccountGrid({ accounts, selectedIds, refreshingIds, onToggleSelect, cur
                     onToggleProxy={() => onToggleProxy(account.id)}
                     onConfigureProxy={() => onConfigureProxy(account.id)}
                     onClearLimit={() => onClearLimit(account.id)}
+                    onClearClaudeProtection={() => onClearClaudeProtection(account.id)}
                     onTestClaude={() => onTestClaude(account.id)}
                     onWarmup={onWarmup ? () => onWarmup(account.id) : undefined}
                     onUpdateLabel={onUpdateLabel ? (label: string) => onUpdateLabel(account.id, label) : undefined}

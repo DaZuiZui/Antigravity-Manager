@@ -1,4 +1,6 @@
 import type { Account } from '../../types/account';
+import type { AppConfig } from '../../types/config';
+import { hasActiveProtectedModels } from '../../utils/quotaProtection';
 
 const AUTO_PROXY_DISABLED_HINTS = [
     '403',
@@ -24,7 +26,7 @@ export function isAutoProxyDisabledReason(reason?: string): boolean {
     return includesAny((reason || '').toLowerCase(), AUTO_PROXY_DISABLED_HINTS);
 }
 
-export function hasClearableAccountState(account: Account): boolean {
+export function hasClearableAccountState(account: Account, config?: AppConfig | null): boolean {
     const resetSeconds = Number(account.rate_limit_reset_seconds || 0);
 
     return Boolean(
@@ -36,7 +38,7 @@ export function hasClearableAccountState(account: Account): boolean {
         account.validation_url ||
         account.quota?.is_forbidden ||
         account.quota?.forbidden_reason ||
-        (account.protected_models?.length || 0) > 0 ||
+        hasActiveProtectedModels(account, config) ||
         (account.proxy_disabled && isAutoProxyDisabledReason(account.proxy_disabled_reason))
     );
 }

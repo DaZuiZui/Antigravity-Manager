@@ -600,6 +600,28 @@ function Accounts() {
     }
   };
 
+  const handleClearClaudeProtection = async (accountId: string) => {
+    setRefreshingIds((prev) => {
+      const next = new Set(prev);
+      next.add(accountId);
+      return next;
+    });
+    try {
+      await invoke('clear_account_model_protection', { accountId, modelId: 'claude' });
+      await invoke('clear_proxy_session_bindings').catch(() => null);
+      await fetchAccounts();
+      showToast(t('accounts.claude_protection_cleared', '已取消该账号的 Claude 保护'), 'success');
+    } catch (error) {
+      showToast(`${t("common.error")}: ${error}`, "error");
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  };
+
   const handleTestClaude = (accountId: string) => {
     const account = accounts.find((item) => item.id === accountId) || null;
     const options = buildTestModelOptions(account);
@@ -1387,6 +1409,7 @@ function Accounts() {
                   if (account) setProxyAccount(account);
                 }}
                 onClearLimit={handleClearLimit}
+                onClearClaudeProtection={handleClearClaudeProtection}
                 onTestClaude={handleTestClaude}
                 onReorder={reorderAccounts}
                 onWarmup={handleWarmup}
@@ -1421,6 +1444,7 @@ function Accounts() {
                 if (account) setProxyAccount(account);
               }}
               onClearLimit={handleClearLimit}
+              onClearClaudeProtection={handleClearClaudeProtection}
               onTestClaude={handleTestClaude}
               onWarmup={handleWarmup}
               onUpdateLabel={handleUpdateLabel}

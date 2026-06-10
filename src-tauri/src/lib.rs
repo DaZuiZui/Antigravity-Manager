@@ -481,6 +481,7 @@ pub fn run() {
             commands::update_last_check_time,
             commands::toggle_proxy_status,
             commands::clear_account_error_state,
+            commands::clear_account_model_protection,
             // Proxy service commands
             commands::proxy::start_proxy_service,
             commands::proxy::stop_proxy_service,

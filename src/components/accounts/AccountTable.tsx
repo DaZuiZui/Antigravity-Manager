@@ -31,6 +31,7 @@ import {
     Fingerprint,
     Info,
     Lock,
+    Unlock,
     Ban,
     Diamond,
     Gem,
@@ -57,6 +58,8 @@ import { QuotaItem } from './QuotaItem';
 import { MODEL_CONFIG, sortModels } from '../../config/modelConfig';
 import { getValidationBlockedStatusLabel } from './accountValidationStatus';
 import { hasClearableAccountState } from './accountClearState';
+import { shouldShowClaudeProtection } from '../../utils/quotaProtection';
+import type { AppConfig } from '../../types/config';
 
 // ============================================================================
 // 类型定义
@@ -79,6 +82,7 @@ interface AccountTableProps {
     onToggleProxy: (accountId: string) => void;
     onConfigureProxy: (accountId: string) => void;
     onClearLimit: (accountId: string) => void;
+    onClearClaudeProtection: (accountId: string) => void;
     onTestClaude: (accountId: string) => void;
     onWarmup?: (accountId: string) => void;
     onUpdateLabel?: (accountId: string, label: string) => void;
@@ -104,6 +108,7 @@ interface SortableRowProps {
     onToggleProxy: () => void;
     onConfigureProxy: () => void;
     onClearLimit: () => void;
+    onClearClaudeProtection: () => void;
     onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
@@ -125,6 +130,7 @@ interface AccountRowContentProps {
     onToggleProxy: () => void;
     onConfigureProxy: () => void;
     onClearLimit: () => void;
+    onClearClaudeProtection: () => void;
     onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
@@ -215,9 +221,9 @@ function formatWait(seconds?: number): string {
     return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
-function getAccountStatus(account: Account, isDisabled: boolean, validationBlockedLabel: string, t: any) {
+function getAccountStatus(account: Account, isDisabled: boolean, validationBlockedLabel: string, t: any, config: AppConfig | null) {
     const wait = formatWait(account.rate_limit_reset_seconds);
-    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
+    const hasClaudeProtection = shouldShowClaudeProtection(account, config);
 
     if (isDisabled) {
         return { tone: 'red', icon: Ban, label: t('accounts.status.disabled'), detail: account.disabled_reason };
@@ -317,6 +323,7 @@ function SortableAccountRow({
     onToggleProxy,
     onConfigureProxy,
     onClearLimit,
+    onClearClaudeProtection,
     onTestClaude,
     onWarmup,
     onUpdateLabel,
@@ -386,6 +393,7 @@ function SortableAccountRow({
                 onToggleProxy={onToggleProxy}
                 onConfigureProxy={onConfigureProxy}
                 onClearLimit={onClearLimit}
+                onClearClaudeProtection={onClearClaudeProtection}
                 onTestClaude={onTestClaude}
                 onWarmup={onWarmup}
                 onUpdateLabel={onUpdateLabel}
@@ -414,6 +422,7 @@ function AccountRowContent({
     onToggleProxy,
     onConfigureProxy,
     onClearLimit,
+    onClearClaudeProtection,
     onTestClaude,
     onWarmup,
     onUpdateLabel,
@@ -422,8 +431,9 @@ function AccountRowContent({
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
     const validationBlockedLabel = getValidationBlockedStatusLabel(account.validation_blocked_reason, t);
-    const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t);
-    const showClearCooldown = hasClearableAccountState(account);
+    const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t, config);
+    const hasClaudeProtection = shouldShowClaudeProtection(account, config);
+    const showClearCooldown = hasClearableAccountState(account, config);
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -621,8 +631,18 @@ function AccountRowContent({
 
             {/* 状态列 */}
             <td className="px-2 py-1 align-middle">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                     <StatusPill status={status} />
+                    {hasClaudeProtection && (
+                        <button
+                            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white text-[10px] font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-800"
+                            title={t('accounts.clear_claude_protection_tooltip', 'Only clear Claude quota protection for this account.')}
+                            onClick={(e) => { e.stopPropagation(); onClearClaudeProtection(); }}
+                        >
+                            <Unlock className="w-3 h-3" />
+                            {t('accounts.clear_claude_protection', '取消 Claude 保护')}
+                        </button>
+                    )}
                     {showClearCooldown && (
                         <button
                             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-[10px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300"
@@ -796,6 +816,15 @@ function AccountRowContent({
                             <RotateCcw className="w-3.5 h-3.5" />
                         </TooltipIconButton>
                     )}
+                    {hasClaudeProtection && (
+                        <TooltipIconButton
+                            label={t('accounts.clear_claude_protection', '取消 Claude 保护')}
+                            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all"
+                            onClick={(e) => { e.stopPropagation(); onClearClaudeProtection(); }}
+                        >
+                            <Unlock className="w-3.5 h-3.5" />
+                        </TooltipIconButton>
+                    )}
                     <TooltipIconButton
                         label={t('accounts.test_model', '测试该账号')}
                         className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${isRefreshing ? 'bg-violet-50 dark:bg-violet-900/10 text-violet-600 dark:text-violet-400 cursor-not-allowed' : 'hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30'}`}
@@ -858,6 +887,7 @@ function AccountTable({
     onToggleProxy,
     onConfigureProxy,
     onClearLimit,
+    onClearClaudeProtection,
     onTestClaude,
     onReorder,
     onWarmup,
@@ -932,7 +962,7 @@ function AccountTable({
                                 />
                             </th>
                             <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[300px] whitespace-nowrap">{t('accounts.table.email')}</th>
-                            <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[190px] whitespace-nowrap">{t('accounts.table.status', '状态')}</th>
+                            <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[240px] whitespace-nowrap">{t('accounts.table.status', '状态')}</th>
                             <th className="px-2 py-1 text-left rtl:text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[380px] whitespace-nowrap">
                                 {t('accounts.table.quota')}
                             </th>
@@ -961,6 +991,7 @@ function AccountTable({
                                     onToggleProxy={() => onToggleProxy(account.id)}
                                     onConfigureProxy={() => onConfigureProxy(account.id)}
                                     onClearLimit={() => onClearLimit(account.id)}
+                                    onClearClaudeProtection={() => onClearClaudeProtection(account.id)}
                                     onTestClaude={() => onTestClaude(account.id)}
                                     onWarmup={onWarmup ? () => onWarmup(account.id) : undefined}
                                     onUpdateLabel={onUpdateLabel ? (label: string) => onUpdateLabel(account.id, label) : undefined}
@@ -1006,6 +1037,7 @@ function AccountTable({
                                         onToggleProxy={() => { }}
                                         onConfigureProxy={() => { }}
                                         onClearLimit={() => { }}
+                                        onClearClaudeProtection={() => { }}
                                         onTestClaude={() => { }}
                                         isDisabled={Boolean(activeAccount.disabled)}
                                         onViewError={() => { }}

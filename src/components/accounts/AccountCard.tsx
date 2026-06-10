@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle, ToggleLeft, ToggleRight, Fingerprint, Sparkles, Tag, X, Check, Clock, Bot, Repeat2, Network, RotateCcw, FlaskConical } from 'lucide-react';
+import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Unlock, Ban, Diamond, Gem, Circle, ToggleLeft, ToggleRight, Fingerprint, Sparkles, Tag, X, Check, Clock, Bot, Repeat2, Network, RotateCcw, FlaskConical } from 'lucide-react';
 import { Account } from '../../types/account';
 import { cn } from '../../utils/cn';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,8 @@ import { QuotaItem } from './QuotaItem';
 import { MODEL_CONFIG, sortModels } from '../../config/modelConfig';
 import { getValidationBlockedStatusLabel } from './accountValidationStatus';
 import { hasClearableAccountState } from './accountClearState';
+import { shouldShowClaudeProtection } from '../../utils/quotaProtection';
+import type { AppConfig } from '../../types/config';
 
 interface AccountCardProps {
     account: Account;
@@ -25,6 +27,7 @@ interface AccountCardProps {
     onToggleProxy: () => void;
     onConfigureProxy: () => void;
     onClearLimit: () => void;
+    onClearClaudeProtection: () => void;
     onTestClaude: () => void;
     onWarmup?: () => void;
     onUpdateLabel?: (label: string) => void;
@@ -49,9 +52,9 @@ function formatWait(seconds?: number): string {
     return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
-function getAccountStatus(account: Account, isDisabled: boolean, validationBlockedLabel: string, t: any) {
+function getAccountStatus(account: Account, isDisabled: boolean, validationBlockedLabel: string, t: any, config: AppConfig | null) {
     const wait = formatWait(account.rate_limit_reset_seconds);
-    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
+    const hasClaudeProtection = shouldShowClaudeProtection(account, config);
 
     if (isDisabled) {
         return { tone: 'red', icon: Ban, label: t('accounts.status.disabled'), detail: account.disabled_reason };
@@ -126,15 +129,15 @@ function TooltipIconButton({
     );
 }
 
-function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
+function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onConfigureProxy, onClearLimit, onClearClaudeProtection, onTestClaude, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
     const { t } = useTranslation();
     const { config, showAllQuotas } = useConfigStore();
     const isDisabled = Boolean(account.disabled);
     const validationBlockedLabel = getValidationBlockedStatusLabel(account.validation_blocked_reason, t);
     const rateLimitWait = formatWait(account.rate_limit_reset_seconds);
-    const hasClaudeProtection = Boolean(account.protected_models?.some(model => model.includes('claude')));
-    const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t);
-    const showClearCooldown = hasClearableAccountState(account);
+    const hasClaudeProtection = shouldShowClaudeProtection(account, config);
+    const status = getAccountStatus(account, isDisabled, validationBlockedLabel, t, config);
+    const showClearCooldown = hasClearableAccountState(account, config);
 
     // 自定义标签编辑状态
     const [isEditingLabel, setIsEditingLabel] = useState(false);
@@ -333,15 +336,27 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                     </div>
                     <StatusPill status={status} />
                 </div>
-                {showClearCooldown && (
-                    <button
-                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-[10px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300"
-                        onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
-                    >
-                        <RotateCcw className="w-3 h-3" />
-                        {t('accounts.clear_limit', '解除限流/冻结')}
-                    </button>
-                )}
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                    {hasClaudeProtection && (
+                        <button
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white text-[10px] font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-800"
+                            title={t('accounts.clear_claude_protection_tooltip', 'Only clear Claude quota protection for this account.')}
+                            onClick={(e) => { e.stopPropagation(); onClearClaudeProtection(); }}
+                        >
+                            <Unlock className="w-3 h-3" />
+                            {t('accounts.clear_claude_protection', '取消 Claude 保护')}
+                        </button>
+                    )}
+                    {showClearCooldown && (
+                        <button
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-[10px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-300"
+                            onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
+                        >
+                            <RotateCcw className="w-3 h-3" />
+                            {t('accounts.clear_limit', '解除限流/冻结')}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* 配额展示 */}
@@ -504,6 +519,15 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, is
                             onClick={(e) => { e.stopPropagation(); onClearLimit(); }}
                         >
                             <RotateCcw className="w-3.5 h-3.5" />
+                        </TooltipIconButton>
+                    )}
+                    {hasClaudeProtection && (
+                        <TooltipIconButton
+                            label={t('accounts.clear_claude_protection', '取消 Claude 保护')}
+                            className="p-1.5 text-gray-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 rounded-lg transition-all"
+                            onClick={(e) => { e.stopPropagation(); onClearClaudeProtection(); }}
+                        >
+                            <Unlock className="w-3.5 h-3.5" />
                         </TooltipIconButton>
                     )}
                     <TooltipIconButton

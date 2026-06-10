@@ -1,7 +1,7 @@
 import { Shield, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { QuotaProtectionConfig } from '../../types/config';
-import { MODEL_CONFIG } from '../../config/modelConfig';
+import { normalizeMonitoredProtectionGroups, QUOTA_PROTECTION_OPTIONS } from '../../utils/quotaProtection';
 
 interface QuotaProtectionProps {
     config: QuotaProtectionConfig;
@@ -10,11 +10,12 @@ interface QuotaProtectionProps {
 
 const QuotaProtection = ({ config, onChange }: QuotaProtectionProps) => {
     const { t } = useTranslation();
+    const selectedModels = normalizeMonitoredProtectionGroups(config.monitored_models);
 
     const handleEnabledChange = (enabled: boolean) => {
-        let newConfig = { ...config, enabled };
+        let newConfig = { ...config, enabled, monitored_models: selectedModels };
         // 如果开启保护且勾选列表为空，则默认勾选 claude
-        if (enabled && (!config.monitored_models || config.monitored_models.length === 0)) {
+        if (enabled && selectedModels.length === 0) {
             newConfig.monitored_models = ['claude'];
         }
         onChange(newConfig);
@@ -27,7 +28,7 @@ const QuotaProtection = ({ config, onChange }: QuotaProtectionProps) => {
     };
 
     const toggleModel = (model: string) => {
-        const currentModels = config.monitored_models || [];
+        const currentModels = selectedModels;
         let newModels: string[];
 
         if (currentModels.includes(model)) {
@@ -40,20 +41,6 @@ const QuotaProtection = ({ config, onChange }: QuotaProtectionProps) => {
 
         onChange({ ...config, monitored_models: newModels });
     };
-
-    const uniqueLabels = new Set<string>();
-    const monitoredModelsOptions = Object.entries(MODEL_CONFIG)
-        .filter(([id, config]) => {
-            if (id.includes('thinking')) return false;
-            const label = config.shortLabel || config.label;
-            if (uniqueLabels.has(label)) return false;
-            uniqueLabels.add(label);
-            return true;
-        })
-        .map(([id, config]) => ({
-            id,
-            label: config.shortLabel || config.label
-        }));
 
     // 计算示例值
     const exampleTotal = 150;
@@ -121,8 +108,8 @@ const QuotaProtection = ({ config, onChange }: QuotaProtectionProps) => {
                             </p>
                         </div>
                         <div className="grid grid-cols-4 gap-2">
-                            {monitoredModelsOptions.map((model) => {
-                                const isSelected = config.monitored_models?.includes(model.id);
+                            {QUOTA_PROTECTION_OPTIONS.map((model) => {
+                                const isSelected = selectedModels.includes(model.id);
                                 return (
                                     <div
                                         key={model.id}

@@ -919,6 +919,32 @@ pub async fn clear_account_error_state(
     Ok(changed)
 }
 
+/// 仅清除账号指定模型组的配额保护，不触碰 403/验证/限流等其他状态。
+#[tauri::command]
+pub async fn clear_account_model_protection(
+    app: tauri::AppHandle,
+    proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+    account_id: String,
+    model_id: String,
+) -> Result<bool, String> {
+    let changed = modules::account::clear_account_model_protection(&account_id, &model_id)?;
+
+    if changed {
+        let instance_lock = proxy_state.instance.read().await;
+        if let Some(instance) = instance_lock.as_ref() {
+            instance
+                .token_manager
+                .reload_account(&account_id)
+                .await
+                .map_err(|e| format!("同步账号失败: {}", e))?;
+        }
+
+        crate::modules::tray::update_tray_menus(&app);
+    }
+
+    Ok(changed)
+}
+
 /// 预热所有可用账号
 #[tauri::command]
 pub async fn warm_up_all_accounts() -> Result<String, String> {
