@@ -627,6 +627,10 @@ impl AxumServer {
                 "/accounts/:accountId/toggle-proxy",
                 post(admin_toggle_proxy_status),
             )
+            .route(
+                "/accounts/:accountId/model-protection/:modelId",
+                delete(admin_clear_account_model_protection),
+            )
             .route("/accounts/warmup", post(admin_warm_up_all_accounts))
             .route("/accounts/:accountId/warmup", post(admin_warm_up_account))
             .route("/system/data-dir", get(admin_get_data_dir_path))
@@ -2411,6 +2415,35 @@ async fn admin_toggle_proxy_status(
     let _ = state.token_manager.reload_account(&account_id).await;
 
     Ok(StatusCode::OK)
+}
+
+async fn admin_clear_account_model_protection(
+    State(state): State<AppState>,
+    Path((account_id, model_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let changed =
+        match crate::modules::account::clear_account_model_protection(&account_id, &model_id) {
+            Ok(changed) => changed,
+            Err(error) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse { error }),
+                ));
+            }
+        };
+
+    if changed {
+        if let Err(error) = state.token_manager.reload_account(&account_id).await {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("同步账号失败: {}", error),
+                }),
+            ));
+        }
+    }
+
+    Ok(Json(changed))
 }
 
 async fn admin_warm_up_all_accounts() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)>
