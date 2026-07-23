@@ -153,6 +153,9 @@ const MODEL_GROUPS = {
         'claude'
     ],
     GEMINI_PRO: [
+        'gemini-3.6-pro-high',
+        'gemini-3.6-pro-low',
+        'gemini-3.6-pro-preview',
         'gemini-3.1-pro-high',
         'gemini-3.1-pro-low',
         'gemini-3.1-pro-preview',
@@ -166,12 +169,15 @@ const MODEL_GROUPS = {
 };
 
 const MODEL_ID_ALIASES: Record<string, string[]> = {
-    'gemini-3-pro-high': ['gemini-3-pro-high', 'gemini-3.1-pro-high'],
-    'gemini-3-pro-low': ['gemini-3-pro-low', 'gemini-3.1-pro-low'],
-    'gemini-3-pro-preview': ['gemini-3-pro-preview', 'gemini-3.1-pro-preview'],
-    'gemini-3.1-pro-high': ['gemini-3.1-pro-high', 'gemini-3-pro-high'],
-    'gemini-3.1-pro-low': ['gemini-3.1-pro-low', 'gemini-3-pro-low'],
-    'gemini-3.1-pro-preview': ['gemini-3.1-pro-preview', 'gemini-3-pro-preview'],
+    'gemini-3-pro-high': ['gemini-3.6-pro-high', 'gemini-3.1-pro-high', 'gemini-3-pro-high'],
+    'gemini-3-pro-low': ['gemini-3.6-pro-low', 'gemini-3.1-pro-low', 'gemini-3-pro-low'],
+    'gemini-3-pro-preview': ['gemini-3.6-pro-preview', 'gemini-3.1-pro-preview', 'gemini-3-pro-preview'],
+    'gemini-3.1-pro-high': ['gemini-3.6-pro-high', 'gemini-3.1-pro-high', 'gemini-3-pro-high'],
+    'gemini-3.1-pro-low': ['gemini-3.6-pro-low', 'gemini-3.1-pro-low', 'gemini-3-pro-low'],
+    'gemini-3.1-pro-preview': ['gemini-3.6-pro-preview', 'gemini-3.1-pro-preview', 'gemini-3-pro-preview'],
+    'gemini-3.6-pro-high': ['gemini-3.6-pro-high', 'gemini-3.1-pro-high', 'gemini-3-pro-high'],
+    'gemini-3.6-pro-low': ['gemini-3.6-pro-low', 'gemini-3.1-pro-low', 'gemini-3-pro-low'],
+    'gemini-3.6-pro-preview': ['gemini-3.6-pro-preview', 'gemini-3.1-pro-preview', 'gemini-3-pro-preview'],
 };
 
 function getModelAliases(modelId: string): string[] {

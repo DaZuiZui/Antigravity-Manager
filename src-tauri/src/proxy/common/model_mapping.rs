@@ -72,6 +72,10 @@ static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|
     // Gemini Pro family:
     // - Concrete model IDs should pass through unchanged.
     // - Generic aliases (without tier) still route to preview as fallback entrypoint.
+    m.insert("gemini-3.6-pro-low", "gemini-3.6-pro-low");
+    m.insert("gemini-3.6-pro-high", "gemini-3.6-pro-high");
+    m.insert("gemini-3.6-pro-preview", "gemini-3.6-pro-preview");
+    m.insert("gemini-3.6-pro", "gemini-3.6-pro-preview");
     m.insert("gemini-3.1-pro-low", "gemini-3.1-pro-low");
     m.insert("gemini-3.1-pro-high", "gemini-3.1-pro-high");
     m.insert("gemini-3.1-pro-preview", "gemini-3.1-pro-preview");
@@ -167,7 +171,7 @@ pub async fn get_all_dynamic_models(
     }
 
     // 5. 确保包含常用的 Gemini/画画模型 ID
-    model_ids.insert("gemini-3.1-pro-low".to_string());
+    model_ids.insert("gemini-3.6-pro-low".to_string());
 
     // [NEW] Issue #247: Dynamically generate all Image Gen Combinations
     let base = "gemini-3-pro-image";
@@ -187,6 +191,8 @@ pub async fn get_all_dynamic_models(
     model_ids.insert("gemini-2.5-flash".to_string());
     // gemini-2.5-pro removed
     model_ids.insert("gemini-3-flash".to_string());
+    model_ids.insert("gemini-3.6-pro-high".to_string());
+    model_ids.insert("gemini-3.6-pro-low".to_string());
     model_ids.insert("gemini-3.1-pro-high".to_string());
     model_ids.insert("gemini-3.1-pro-low".to_string());
 
@@ -414,6 +420,14 @@ mod tests {
             map_claude_model_to_gemini("gemini-3.1-pro-low"),
             "gemini-3.1-pro-low"
         );
+        assert_eq!(
+            map_claude_model_to_gemini("gemini-3.6-pro-high"),
+            "gemini-3.6-pro-high"
+        );
+        assert_eq!(
+            map_claude_model_to_gemini("gemini-3.6-pro-low"),
+            "gemini-3.6-pro-low"
+        );
         // Generic aliases still map to preview entrypoint.
         assert_eq!(
             map_claude_model_to_gemini("gemini-3-pro"),
@@ -422,6 +436,10 @@ mod tests {
         assert_eq!(
             map_claude_model_to_gemini("gemini-3.1-pro"),
             "gemini-3.1-pro-preview"
+        );
+        assert_eq!(
+            map_claude_model_to_gemini("gemini-3.6-pro"),
+            "gemini-3.6-pro-preview"
         );
 
         // Test Normalization (Opus 4.6 now merged into "claude" group)
@@ -441,6 +459,10 @@ mod tests {
         );
         assert_eq!(
             normalize_to_standard_id("gemini-3-pro-high"),
+            Some("gemini-3-pro-high".to_string())
+        );
+        assert_eq!(
+            normalize_to_standard_id("gemini-3.6-pro-high"),
             Some("gemini-3-pro-high".to_string())
         );
 

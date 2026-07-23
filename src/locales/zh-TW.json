@@ -811,6 +811,8 @@
             "pro_legacy": "經典版",
             "pro_low": "標準效能",
             "pro_high": "最強推理",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "圖片生成 (1:1)",
             "pro_image_16_9": "圖片生成 (16:9)",
             "pro_image_9_16": "圖片生成 (9:16)",

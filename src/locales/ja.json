@@ -905,6 +905,8 @@
             "pro_legacy": "レガシーPro",
             "pro_low": "ハイパフォーマンス",
             "pro_high": "最高推論",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "画像生成 (1:1)",
             "pro_image_16_9": "画像生成 (16:9)",
             "pro_image_9_16": "画像生成 (9:16)",

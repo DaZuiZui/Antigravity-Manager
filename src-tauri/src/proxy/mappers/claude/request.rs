@@ -471,6 +471,7 @@ pub fn transform_claude_request_in(
         || mapped_model.contains("gemini-2.0-pro")
         || mapped_model.contains("gemini-3-pro")
         || mapped_model.contains("gemini-3.1-pro")
+        || mapped_model.contains("gemini-3.6-pro")
         // [FIX #2167] gemini-3-flash / gemini-3.1-flash 支持 thinking，必须纳入识别范围
         || mapped_model.contains("gemini-3-flash")
         || mapped_model.contains("gemini-3.1-flash");
@@ -720,6 +721,7 @@ fn should_enable_thinking_by_default(model: &str) -> bool {
     if model_lower.contains("gemini-2.0-pro")
         || model_lower.contains("gemini-3-pro")
         || model_lower.contains("gemini-3.1-pro")
+        || model_lower.contains("gemini-3.6-pro")
     {
         tracing::debug!(
             "[Thinking-Mode] Auto-enabling thinking for Gemini Pro model: {}",
@@ -739,6 +741,17 @@ fn should_enable_thinking_by_default(model: &str) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod gemini_36_thinking_tests {
+    use super::should_enable_thinking_by_default;
+
+    #[test]
+    fn enables_thinking_for_gemini_36_pro() {
+        assert!(should_enable_thinking_by_default("gemini-3.6-pro-high"));
+        assert!(should_enable_thinking_by_default("gemini-3.6-pro-low"));
+    }
 }
 
 /// Minimum length for a valid thought_signature

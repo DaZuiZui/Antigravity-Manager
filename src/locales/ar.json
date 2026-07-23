@@ -810,6 +810,8 @@
             "pro_legacy": "Legacy Pro",
             "pro_low": "أداء عالي",
             "pro_high": "أفضل منطق",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "توليد صورة (1:1)",
             "pro_image_16_9": "توليد صورة (16:9)",
             "pro_image_9_16": "توليد صورة (9:16)",

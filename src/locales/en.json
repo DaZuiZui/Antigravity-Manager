@@ -1006,6 +1006,8 @@
             "pro_legacy": "Legacy Pro",
             "pro_low": "3.1 Pro Low",
             "pro_high": "3.1 Pro High",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "Image Generation (1:1)",
             "pro_image_16_9": "Image Generation (16:9)",
             "pro_image_9_16": "Image Generation (9:16)",

@@ -17,7 +17,9 @@ function BestAccounts({ accounts, currentAccountId, onSwitch }: BestAccountsProp
         .map(a => {
             const proQuota = (a.quota?.models || [])
                 .filter(m =>
-                    m.name.toLowerCase() === 'gemini-3-pro-high'
+                    m.name.toLowerCase() === 'gemini-3.6-pro-high'
+                    || m.name.toLowerCase() === 'gemini-3.6-pro-low'
+                    || m.name.toLowerCase() === 'gemini-3-pro-high'
                     || m.name.toLowerCase() === 'gemini-3-pro-low'
                     || m.name.toLowerCase() === 'gemini-3.1-pro-high'
                     || m.name.toLowerCase() === 'gemini-3.1-pro-low'

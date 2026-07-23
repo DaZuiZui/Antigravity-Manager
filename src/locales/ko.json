@@ -815,6 +815,8 @@
             "pro_legacy": "레거시 Pro",
             "pro_low": "고성능",
             "pro_high": "최고의 추론",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "이미지 생성 (1:1)",
             "pro_image_16_9": "이미지 생성 (16:9)",
             "pro_image_9_16": "이미지 생성 (9:16)",

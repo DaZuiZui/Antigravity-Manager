@@ -42,6 +42,7 @@ pub fn transform_openai_request(
                 || mapped_model_lower.contains("gemini-2.0-pro")
                 || mapped_model_lower.contains("gemini-3-pro")
                 || mapped_model_lower.contains("gemini-3.1-pro")
+                || mapped_model_lower.contains("gemini-3.6-pro")
         )
         && !mapped_model_lower.contains("claude");
     // [FIX #2167] gemini-3-flash / gemini-3.1-flash 支持 thinking，functionCall 必须携带 thoughtSignature
@@ -933,6 +934,15 @@ mod tests {
         let budget = gen_config["thinkingConfig"]["thinkingBudget"].as_u64().unwrap();
         // Should use user budget (16000) or capped valid default
         assert_eq!(budget, 16000);
+
+        let (result_36, _, _) =
+            transform_openai_request(&req, "test-p", "gemini-3.6-pro-high", None);
+        assert!(
+            result_36["request"]["generationConfig"]
+                .get("thinkingConfig")
+                .is_some(),
+            "thinkingConfig should be injected for gemini-3.6-pro-high"
+        );
     }
     #[test]
     fn test_gemini_3_pro_image_not_thinking() {

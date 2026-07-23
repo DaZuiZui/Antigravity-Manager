@@ -1114,6 +1114,10 @@ impl TokenManager {
         }
 
         let pro_family = [
+            "gemini-3.6-pro",
+            "gemini-3.6-pro-preview",
+            "gemini-3.6-pro-high",
+            "gemini-3.6-pro-low",
             "gemini-3-pro",
             "gemini-3-pro-preview",
             "gemini-3-pro-high",
@@ -1139,6 +1143,9 @@ impl TokenManager {
 
         // Keep requested model as top priority, then fallback across the same family.
         push(&model);
+        push("gemini-3.6-pro-preview");
+        push("gemini-3.6-pro-high");
+        push("gemini-3.6-pro-low");
         push("gemini-3.1-pro-preview");
         push("gemini-3-pro-preview");
         push("gemini-3.1-pro-high");
@@ -3999,6 +4006,16 @@ fn truncate_reason(reason: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+
+    #[test]
+    fn test_gemini_36_dynamic_model_candidates() {
+        let candidates = TokenManager::build_dynamic_model_candidates("gemini-3.6-pro-high")
+            .expect("Gemini 3.6 Pro should use dynamic family fallback");
+
+        assert_eq!(candidates.first().unwrap(), "gemini-3.6-pro-high");
+        assert!(candidates.contains(&"gemini-3.6-pro-preview".to_string()));
+        assert!(candidates.contains(&"gemini-3.1-pro-high".to_string()));
+    }
 
     #[tokio::test]
     async fn test_reload_account_purges_cache_when_account_becomes_proxy_disabled() {

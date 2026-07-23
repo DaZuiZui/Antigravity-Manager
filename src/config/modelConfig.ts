@@ -27,6 +27,28 @@ export interface ModelConfig {
  * 键为模型 ID，值为模型配置
  */
 export const MODEL_CONFIG: Record<string, ModelConfig> = {
+    // Gemini 3.6 系列
+    'gemini-3.6-pro-high': {
+        label: 'Gemini 3.6 Pro High',
+        shortLabel: 'G3.6 Pro',
+        protectedKey: 'gemini-pro',
+        Icon: Gemini.Color,
+        i18nKey: 'proxy.model.gemini_3_6_pro_high',
+        i18nDescKey: 'proxy.model.gemini_3_6_pro_high',
+        group: 'Gemini 3.6',
+        tags: ['pro', 'high'],
+    },
+    'gemini-3.6-pro-low': {
+        label: 'Gemini 3.6 Pro Low',
+        shortLabel: 'G3.6 Low',
+        protectedKey: 'gemini-pro',
+        Icon: Gemini.Color,
+        i18nKey: 'proxy.model.gemini_3_6_pro_low',
+        i18nDescKey: 'proxy.model.gemini_3_6_pro_low',
+        group: 'Gemini 3.6',
+        tags: ['pro', 'low'],
+    },
+
     // Gemini 3.x 系列
     // [Migrate] Gemini 3 Pro High/Low -> Gemini 3.1 Pro High/Low
     'gemini-3.1-pro-high': {
@@ -196,6 +218,7 @@ export const getModelConfig = (modelId: string): ModelConfig | undefined => {
 const MODEL_SORT_WEIGHTS = {
     // 系列权重 (第一优先级)
     series: {
+        'gemini-3.6': 50,
         'gemini-3': 100,
         'gemini-2.5': 200,
         'gemini-2': 300,
@@ -226,7 +249,9 @@ function getModelSortWeight(modelId: string): number {
     let weight = 0;
 
     // 1. 系列权重 (x1000)
-    if (id.startsWith('gemini-3')) {
+    if (id.startsWith('gemini-3.6')) {
+        weight += MODEL_SORT_WEIGHTS.series['gemini-3.6'] * 1000;
+    } else if (id.startsWith('gemini-3')) {
         weight += MODEL_SORT_WEIGHTS.series['gemini-3'] * 1000;
     } else if (id.startsWith('gemini-2.5')) {
         weight += MODEL_SORT_WEIGHTS.series['gemini-2.5'] * 1000;
