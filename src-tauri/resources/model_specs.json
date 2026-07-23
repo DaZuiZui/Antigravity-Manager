@@ -20,6 +20,21 @@
             "thinking_budget": 49152,
             "is_thinking": true
         },
+        "gemini-3.6-pro-high": {
+            "max_output_tokens": 65536,
+            "thinking_budget": 49152,
+            "is_thinking": true
+        },
+        "gemini-3.6-pro-low": {
+            "max_output_tokens": 65536,
+            "thinking_budget": 49152,
+            "is_thinking": true
+        },
+        "gemini-3.6-pro-preview": {
+            "max_output_tokens": 65536,
+            "thinking_budget": 49152,
+            "is_thinking": true
+        },
         "gemini-3.1-pro-preview": {
             "max_output_tokens": 65536,
             "thinking_budget": 49152,

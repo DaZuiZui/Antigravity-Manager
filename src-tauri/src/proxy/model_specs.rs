@@ -80,3 +80,15 @@ pub fn is_thinking_model(model_id: &str) -> bool {
     }
     model_id.contains("-thinking") || model_id.contains("thinking")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_36_specs_are_registered() {
+        assert_eq!(get_max_output_tokens("gemini-3.6-pro-high", None), 65_536);
+        assert_eq!(get_thinking_budget("gemini-3.6-pro-low", None), 49_152);
+        assert!(is_thinking_model("gemini-3.6-pro-preview"));
+    }
+}

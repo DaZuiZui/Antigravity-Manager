@@ -91,6 +91,27 @@ fn build_model_catalog() -> Vec<ModelDef> {
             reasoning: true,
             variant_type: Some(VariantType::ClaudeThinking),
         },
+        // Gemini 3.6 Pro models
+        ModelDef {
+            id: "gemini-3.6-pro-high",
+            name: "Gemini 3.6 Pro High",
+            context_limit: 1_048_576,
+            output_limit: 65_536,
+            input_modalities: &["text", "image", "pdf"],
+            output_modalities: &["text", "image"],
+            reasoning: true,
+            variant_type: Some(VariantType::Gemini3Pro),
+        },
+        ModelDef {
+            id: "gemini-3.6-pro-low",
+            name: "Gemini 3.6 Pro Low",
+            context_limit: 1_048_576,
+            output_limit: 65_536,
+            input_modalities: &["text", "image", "pdf"],
+            output_modalities: &["text", "image"],
+            reasoning: true,
+            variant_type: Some(VariantType::Gemini3Pro),
+        },
         // Gemini 3.1 Pro models
         ModelDef {
             id: "gemini-3.1-pro-high",
@@ -1358,6 +1379,7 @@ mod tests {
         // Should have all catalog models
         assert!(models.contains_key("claude-sonnet-4-6"), "should have claude-sonnet-4-6");
         assert!(models.contains_key("gemini-3.1-pro-high"), "should have gemini-3.1-pro-high");
+        assert!(models.contains_key("gemini-3.6-pro-high"), "should have gemini-3.6-pro-high");
         assert!(models.contains_key("gemini-2.5-pro"), "should have gemini-2.5-pro");
 
         // Check model structure
@@ -1615,6 +1637,8 @@ const ANTIGRAVITY_MODEL_IDS: &[&str] = &[
     "claude-sonnet-4-5",
     "claude-sonnet-4-5-thinking",
     "claude-opus-4-5-thinking",
+    "gemini-3.6-pro-high",
+    "gemini-3.6-pro-low",
     "gemini-3.1-pro-high",
     "gemini-3.1-pro-low",
     "gemini-3-pro-high",

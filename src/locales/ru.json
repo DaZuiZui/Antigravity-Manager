@@ -806,6 +806,8 @@
             "pro_legacy": "Устаревший Pro",
             "pro_low": "Высокая производительность",
             "pro_high": "Лучшее мышление",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "Генерация изображений (1:1)",
             "pro_image_16_9": "Генерация изображений (16:9)",
             "pro_image_9_16": "Генерация изображений (9:16)",

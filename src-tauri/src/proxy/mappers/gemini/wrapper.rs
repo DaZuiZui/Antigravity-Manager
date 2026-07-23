@@ -131,7 +131,8 @@ pub fn wrap_request(
         let should_inject = lower_model.contains("thinking")
             || (lower_model.contains("gemini-2.0-pro") && !is_preview)
             || (lower_model.contains("gemini-3-pro") && !is_preview)
-            || (lower_model.contains("gemini-3.1-pro") && !is_preview);
+            || (lower_model.contains("gemini-3.1-pro") && !is_preview)
+            || (lower_model.contains("gemini-3.6-pro") && !is_preview);
 
         if should_inject {
             // Scope for borrowing inner_request/gen_config
@@ -1014,6 +1015,25 @@ mod tests {
         assert!(
             gen_config_std.get("thinkingConfig").is_some(),
             "Should still auto-inject thinkingConfig for standard gemini-3-pro"
+        );
+
+        let body_36 = json!({
+            "model": "gemini-3.6-pro-high",
+            "generationConfig": {}
+        });
+        let result_36 = wrap_request(
+            &body_36,
+            "test-proj",
+            "gemini-3.6-pro-high",
+            None,
+            None,
+            None,
+        );
+        assert!(
+            result_36["request"]["generationConfig"]
+                .get("thinkingConfig")
+                .is_some(),
+            "Should auto-inject thinkingConfig for gemini-3.6-pro-high"
         );
     }
 

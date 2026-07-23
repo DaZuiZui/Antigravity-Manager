@@ -805,6 +805,8 @@
             "pro_legacy": "Pro Legado",
             "pro_low": "Alto Desempenho",
             "pro_high": "Melhor Raciocínio",
+            "gemini_3_6_pro_low": "Gemini 3.6 Pro Low",
+            "gemini_3_6_pro_high": "Gemini 3.6 Pro High",
             "pro_image": "Geração de Imagem (1:1)",
             "pro_image_16_9": "Geração de Imagem (16:9)",
             "pro_image_9_16": "Geração de Imagem (9:16)",

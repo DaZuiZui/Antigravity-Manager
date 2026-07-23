@@ -30,6 +30,8 @@ interface HoverState {
 }
 
 const GEMINI_PRO_NAMES = new Set([
+    'gemini-3.6-pro-high',
+    'gemini-3.6-pro-low',
     'gemini-3-pro-high',
     'gemini-3-pro-low',
     'gemini-3.1-pro-high',
